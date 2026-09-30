@@ -47,6 +47,20 @@ test("Time config rejects non-positive interval", () => {
   assert.equal(resolved.interval, 60 * 60 * 1000);
 });
 
+test("Time config rejects non-finite intervals", () => {
+  for (const interval of [NaN, Infinity, -Infinity]) {
+    assert.equal(resolveTelegramTimeConfig({ injectionMode: "interval", interval }).interval, 3_600_000);
+  }
+});
+
+test("Time injection recovers when the wall clock moves backwards", () => {
+  const runtime = makeRuntime({ injectionMode: "interval", interval: 60_000, timezone: "UTC" });
+  assert.ok(runtime.resolveLine(1, new Date("2026-05-16T15:00:00Z")));
+  assert.ok(runtime.resolveLine(1, new Date("2026-05-16T14:00:00Z")));
+  assert.equal(runtime.resolveLine(1, new Date("2026-05-16T14:00:30Z")), null);
+  assert.ok(runtime.resolveLine(1, new Date("2026-05-16T14:01:00Z")));
+});
+
 test("Time injection runtime returns null for every call when injectionMode is hidden", () => {
   const runtime = makeRuntime({ injectionMode: "hidden", timezone: "UTC" });
   for (let i = 0; i < 5; i++) {

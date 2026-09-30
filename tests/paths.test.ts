@@ -14,7 +14,19 @@ import {
   resolveTelegramLocksPath,
   resolveTelegramTempDir,
   resolveTelegramRuntimeLogPath,
+  getTelegramDiagnosticsDisplayPaths,
+  resolveTelegramProfileTempFilePath,
 } from "../lib/paths.ts";
+
+test("Diagnostics use the resolved agent root and profile suffix", () => {
+  const agentDir = resolveAgentDir();
+  for (const profile of [undefined, "work"]) {
+    assert.deepEqual(getTelegramDiagnosticsDisplayPaths(profile), {
+      state: resolveTelegramProfileTempFilePath("state", "json", agentDir, profile),
+      logs: resolveTelegramProfileTempFilePath("logs", "jsonl", agentDir, profile),
+    });
+  }
+});
 
 await test("resolveAgentDir", async (t) => {
   await t.test("returns PI_CODING_AGENT_DIR when env is set", () => {

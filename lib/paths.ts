@@ -75,11 +75,10 @@ export function getTelegramDiagnosticsDisplayPaths(profileName?: string): {
   state: string;
   logs: string;
 } {
-  const suffix = getTelegramProfilePathSuffix(profileName);
-  const profileSlug = suffix.slice(1);
+  const agentDir = resolveAgentDir();
   return {
-    state: `~/.pi/agent/tmp/telegram/state${suffix}.json`,
-    logs: `~/.pi/agent/tmp/telegram/logs${profileSlug ? `.${profileSlug}` : ""}.jsonl`,
+    state: resolveTelegramProfileTempFilePath("state", "json", agentDir, profileName),
+    logs: resolveTelegramProfileTempFilePath("logs", "jsonl", agentDir, profileName),
   };
 }
 
