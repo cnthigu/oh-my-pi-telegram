@@ -55,15 +55,25 @@ export type CurrentModelRuntime<
 > = CurrentModelStore<TContext, TModel> &
   CurrentModelUpdateRuntime<TContext, TModel>;
 
+/**
+ * `preferContextModel` makes the host's live context model win over the stored
+ * one. Pi pushes model changes through `model_select`, so its stored value is
+ * current; omp has no such event, so its stored value would go stale after a
+ * local `/model` switch.
+ */
 export function createCurrentModelStore<
   TContext,
   TModel extends MenuModel = MenuModel,
 >(
   getContextModel: (ctx: TContext) => TModel | undefined,
+  preferContextModel = false,
 ): CurrentModelStore<TContext, TModel> {
   let currentModel: TModel | undefined;
   return {
-    get: (ctx) => currentModel ?? getContextModel(ctx),
+    get: (ctx) =>
+      preferContextModel
+        ? (getContextModel(ctx) ?? currentModel)
+        : (currentModel ?? getContextModel(ctx)),
     getStored: () => currentModel,
     set: (model) => {
       currentModel = model;
@@ -96,8 +106,12 @@ export function createCurrentModelRuntime<
 >(deps: {
   getContextModel: (ctx: TContext) => TModel | undefined;
   updateStatus: (ctx: TContext) => void;
+  preferContextModel?: boolean;
 }): CurrentModelRuntime<TContext, TModel> {
-  const store = createCurrentModelStore(deps.getContextModel);
+  const store = createCurrentModelStore(
+    deps.getContextModel,
+    deps.preferContextModel,
+  );
   return {
     ...store,
     ...createCurrentModelUpdateRuntime({

@@ -10,6 +10,7 @@ import test from "node:test";
 
 import {
   resolveAgentDir,
+  setHostAgentDirResolver,
   resolveTelegramConfigPath,
   resolveTelegramLocksPath,
   resolveTelegramTempDir,
@@ -29,41 +30,32 @@ test("Diagnostics use the resolved agent root and profile suffix", () => {
 });
 
 await test("resolveAgentDir", async (t) => {
-  await t.test("returns PI_CODING_AGENT_DIR when env is set", () => {
+  t.afterEach(() => setHostAgentDirResolver(undefined));
+
+  await t.test("PI_CODING_AGENT_DIR wins over the host directory", () => {
+    setHostAgentDirResolver(() => {
+      throw new Error("host directory must not be consulted");
+    });
     assert.equal(
-      resolveAgentDir({
-        env: { PI_CODING_AGENT_DIR: "/custom/agent/dir" },
-        execPath: "/usr/bin/omp",
-        argv: ["omp"],
-      }),
+      resolveAgentDir({ env: { PI_CODING_AGENT_DIR: "/custom/agent/dir" } }),
       resolve("/custom/agent/dir"),
     );
   });
 
-  await t.test("returns ~/.omp/agent for OMP-compatible runtimes", () => {
-    assert.equal(
-      resolveAgentDir({ env: {}, execPath: "/home/user/.local/bin/omp" }),
-      join(homedir(), ".omp", "agent"),
-    );
-    assert.equal(
-      resolveAgentDir({
-        env: {},
-        execPath: "/usr/bin/node",
-        argv: ["node", "omp"],
-      }),
-      join(homedir(), ".omp", "agent"),
-    );
-  });
-
   await t.test(
-    "returns ~/.pi/agent as fallback when no env and no OMP runtime",
+    "uses the registered host runtime directory when env is unset",
     () => {
-      assert.equal(
-        resolveAgentDir({ env: {}, execPath: "/usr/bin/node", argv: ["node"] }),
-        join(homedir(), ".pi", "agent"),
-      );
+      setHostAgentDirResolver(() => "/home/user/.omp/agent");
+      assert.equal(resolveAgentDir({ env: {} }), "/home/user/.omp/agent");
     },
   );
+
+  await t.test("falls back to ~/.pi/agent when no host is registered", () => {
+    assert.equal(
+      resolveAgentDir({ env: {} }),
+      join(homedir(), ".pi", "agent"),
+    );
+  });
 });
 
 await test("resolveTelegramConfigPath", () => {

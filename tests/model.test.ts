@@ -83,6 +83,18 @@ test("Current model store prefers explicit Telegram model over context fallback"
   assert.equal(store.get({ model: fallback }), fallback);
 });
 
+test("Current model store follows the live context model on hosts without model_select", () => {
+  const stale = { provider: "stale", id: "a", name: "Stale" };
+  const live = { provider: "live", id: "b", name: "Live" };
+  const store = createCurrentModelStore<{ model?: typeof live }, typeof live>(
+    (ctx) => ctx.model,
+    true,
+  );
+  store.set(stale);
+  assert.equal(store.get({ model: live }), live);
+  assert.equal(store.get({ model: undefined }), stale);
+});
+
 test("Current model runtime combines store fallback and status updates", () => {
   const fallback = { provider: "fallback", id: "f", name: "Fallback" };
   const selected = { provider: "selected", id: "s", name: "Selected" };

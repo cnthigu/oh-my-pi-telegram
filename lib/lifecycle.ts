@@ -23,6 +23,7 @@ import type {
   ToolExecutionStartEvent,
   ToolExecutionUpdateEvent,
 } from "./pi.ts";
+import { isTerminalAgentEnd } from "./pi.ts";
 
 let resetTransportReplyDedupFn: (() => void) | undefined;
 
@@ -110,6 +111,12 @@ export interface TelegramLifecycleRegistrationDeps {
     event: AgentSettledEvent,
     ctx: ExtensionContext,
   ) => Promise<void> | void;
+  /**
+   * Hosts that never emit `agent_settled` (omp) get it synthesized from the
+   * first terminal `agent_end`. Leave unset on hosts that emit it natively so
+   * the settle point is not announced early.
+   */
+  settleOnTerminalAgentEnd?: boolean;
 }
 
 export interface TelegramSessionLifecycleHooks {
@@ -562,6 +569,9 @@ export function registerTelegramLifecycleHooks(
   pi.on("agent_end", async (event, ctx) => {
     if (!isActive(ctx)) return;
     await deps.onAgentEnd(event, ctx);
+    if (deps.settleOnTerminalAgentEnd && isTerminalAgentEnd(event)) {
+      await deps.onAgentSettled?.({ type: "agent_settled" }, ctx);
+    }
   });
   pi.on("agent_settled", async (event, ctx) => {
     if (!isActive(ctx)) return;

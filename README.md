@@ -67,7 +67,7 @@ Telegram DM ──▶ getUpdates (single polling owner)
 
 - Node.js `>= 22.19.0` (declared in `engines`; verified here on 24.20.0)
 - npm `>= 10` for the validation gates (verified on 11.19.0). `bun` also works for running the extension, but the gates are npm-based.
-- `omp` `>= 16.5.2` (verified with `omp` 18.1.20) or a Pi runtime exposing the same `@earendil-works/pi-*` extension API
+- `omp` `>= 16.5.2` (verified with `omp` 18.4.8) or a Pi runtime exposing the same `@earendil-works/pi-*` extension API
 - A Telegram bot token from [@BotFather](https://t.me/BotFather)
 
 ## Quick start
@@ -100,7 +100,7 @@ Then inside `omp`:
 
 Finally, open the bot DM and send `/start`. The first Telegram user to write becomes the allowed owner.
 
-Config is written to `<agent-dir>/telegram.json`. The agent directory is resolved as: `PI_CODING_AGENT_DIR` if set, then `~/.omp/agent` when the runtime is `omp`, otherwise `~/.pi/agent`.
+Config is written to `<agent-dir>/telegram.json`. The agent directory is `PI_CODING_AGENT_DIR` when set, otherwise the directory the host reports through `getAgentDir()`: `~/.pi/agent` on Pi, and on `omp` its profile-aware directory (`~/.omp/agent` by default). The executable name and `argv` are not inspected.
 
 ## Usage
 
@@ -217,6 +217,7 @@ Everything below was executed in this repository on Node 24.20.0 / npm 11.19.0 (
 | `omp plugin doctor` | `3 ok, 1 warnings, 0 errors` (warning: no plugin package manifest) |
 | `omp install <local path>` | exit 0, `Linked @evandrodevbr/oh-my-pi-telegram from .` (the link was reverted afterwards to leave the machine as it was) |
 | `omp install --link <path>` | fails: `Unknown option '--link'` (kept out of this README) |
+| ad hoc e2e on `omp` 18.4.8 | throwaway harness, not kept in the repo: real `omp --mode rpc` with a sandboxed `HOME`, a fake Telegram Bot API and a fake OpenAI-compatible model. `/telegram-connect` finds `~/.omp/agent/telegram.json` and nothing is written under `~/.pi`; a Telegram prompt runs a model turn and the reply is delivered; Activity API handlers receive `agent-settled`; `/model` renders and marks the model that was switched locally in `omp` |
 
 The test suite is deterministic and offline: transport calls are injected, so no live Telegram bot is required. Live Telegram paths (long polling, Rich Messages, Threaded Mode threading) are covered by the operator's own smoke sessions, not by this suite; the `Validate` workflow (npm ci + `npm run validate` on Node 24) is green on `main` (run 34838605928, 2026-09-14).
 
@@ -224,11 +225,12 @@ The test suite is deterministic and offline: transport calls are injected, so no
 
 - **Not published to npm**: `@evandrodevbr/oh-my-pi-telegram` returns 404 on the registry. Install from a local checkout; on top of that, `omp` 18.1.20's plugin source resolver rejects `npm` sources (`npm plugin sources are not yet supported. Use git-based sources instead.`).
 - **No GitHub release yet**: the only tag, `v0.22.0-evandro.1`, produced a failed `Release` run (`CHANGELOG.md has no section for 0.22.0-evandro.1`, because the fork section was a level-3 heading). The heading is fixed in this commit, but the existing tag still points at the pre-fix commit, so the release must be created manually or the tag moved.
-- **Fork lags upstream**: this fork stays on upstream `0.22.0` (SHA `afe09c5`), while `@llblab/pi-telegram` has since published 0.46.0. Upstream changes after 0.22.0 are not included.
+- **Fork lags upstream**: this fork stays on upstream `0.22.0` (SHA `afe09c5`), while `@llblab/pi-telegram` has since published 0.51.6. Upstream changes after 0.22.0 are not included. Upstream 0.51.6 loads in `omp` 18.4.8 but subscribes to five events `omp` never emits (`agent_settled`, `model_select`, `session_compact_failed`, `ui_prompt_start`, `ui_prompt_end`), so it is not a drop-in replacement.
 - **Verified on one platform only**: Linux with Node 24.20.0. The suite contains Windows-specific cases (and the single skipped test is one of them), but Windows/macOS were not run here.
-- **Requires a live `omp` instance and a real bot token** for end-to-end use; no automated test covers the Telegram API surface itself.
+- **Requires a live `omp` instance and a real bot token** for end-to-end use; the repository suite does not cover the Telegram API surface, and the `omp` 18.4.8 checks above used a fake Bot API, so live Telegram behavior (Rich Messages, Threaded Mode, voice, files) is unverified on `omp`.
 - **LLM/token cost applies**: a Telegram prompt is a normal model turn in the active session, so it inherits that session's post-compaction context.
 - **Single-owner by design**: the first Telegram user to message the bot is the owner; other users are ignored. No multi-user or group-chat support.
+- **omp host differences**: `omp` emits neither `agent_settled` nor `model_select`. The bridge derives the settled boundary from the first terminal `agent_end` (`willContinue` not `true`) and reads the live model through `ctx.models.current()`. Scoped-model persistence from the Telegram model menu is not offered on `omp`, and its scoped list is read only from a global `enabledModels` array.
 - `bun.lock` is still present from upstream while CI validates with `package-lock.json`; the two are not kept in sync.
 
 ## Documentation

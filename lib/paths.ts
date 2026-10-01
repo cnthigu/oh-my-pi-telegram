@@ -1,19 +1,32 @@
 /**
  * Telegram bridge path resolution for Pi-compatible runtimes
  * Zones: telemetry paths, filesystem, runtime identity
- * Owns agent-dir detection and extension-local path derivation
+ * Owns agent-dir resolution and extension-local path derivation
  *
- * This domain is pure/path-only: it resolves directories and file paths
- * from environment and runtime identity. It does not read config, manage
- * state, or import broader Telegram domains.
+ * This domain is pure/path-only: it resolves directories and file paths from
+ * the environment and the host runtime's own agent directory. It does not read
+ * config, manage state, or import broader Telegram domains or the Pi SDK.
  */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export interface TelegramAgentDirResolutionInput {
   env?: Partial<Pick<NodeJS.ProcessEnv, "PI_CODING_AGENT_DIR">>;
-  execPath?: string;
-  argv?: readonly string[];
+}
+
+let hostAgentDirResolver: (() => string) | undefined;
+
+/**
+ * Register the host runtime's own agent-directory lookup (the Pi SDK
+ * `getAgentDir()`). It is registered by the composition root instead of
+ * imported here: importing the Pi SDK from this leaf made every domain that
+ * touches a path, and every child process the test suite spawns, pay about a
+ * second of SDK startup.
+ */
+export function setHostAgentDirResolver(
+  resolver: (() => string) | undefined,
+): void {
+  hostAgentDirResolver = resolver;
 }
 
 /**
@@ -21,23 +34,18 @@ export interface TelegramAgentDirResolutionInput {
  *
  * Precedence:
  * 1. `PI_CODING_AGENT_DIR` env variable, when explicitly set.
- * 2. Detect Pi-compatible runtime identity from the executable or argv[1]
- *    (e.g. OMP vs standard Pi agent).
- * 3. Fallback: `~/.pi/agent`.
+ * 2. The registered host agent directory. Pi returns `~/.pi/agent`; omp's Pi
+ *    shim returns its profile-aware directory (default `~/.omp/agent`). The
+ *    executable and argv are not inspected: omp installed through Bun runs as
+ *    `bun .../dist/cli.js`, which neither contains nor starts with `omp`.
+ * 3. Fallback when no host is registered: `~/.pi/agent`.
  */
 export function resolveAgentDir(
   input: TelegramAgentDirResolutionInput = {},
 ): string {
   const env = input.env ?? process.env;
   if (env.PI_CODING_AGENT_DIR) return resolve(env.PI_CODING_AGENT_DIR);
-  const execPath = input.execPath ?? process.execPath;
-  const argv = input.argv ?? process.argv;
-  const execBasename = execPath.toLowerCase().split(/[\\/]/u).pop() ?? "";
-  const argv1Last = (argv[1] ?? "").toLowerCase().split(/[\\/]/u).pop() ?? "";
-  if (execBasename.startsWith("omp") || argv1Last.startsWith("omp")) {
-    return join(homedir(), ".omp", "agent");
-  }
-  return join(homedir(), ".pi", "agent");
+  return hostAgentDirResolver?.() ?? join(homedir(), ".pi", "agent");
 }
 
 /** Telegram bridge configuration file (<agentDir>/telegram.json). */
