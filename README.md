@@ -130,6 +130,24 @@ Config is written to `<agent-dir>/telegram.json`. The agent directory is `PI_COD
 
 Profile names: lowercase ASCII letters and digits, up to 32 characters; `default`, `main` and `active` are reserved. Profiles keep isolated polling, diagnostics, Threaded Mode state and local bus transport.
 
+### Status line
+
+The bridge keeps one live line under the `omp` editor. In the interactive TUI it is a themed widget (`omp` strips color from plain extension status text, so the widget is what keeps the theme colors); in RPC, JSON and print modes it falls back to a plain status entry. The glyphs follow `omp`'s `symbolPreset` (`unicode`, `nerd` or `ascii`).
+
+```text
+telegram ● connected · @my_bot · ⤵12 ⤴11 · ⏱ 14:32
+telegram ⟳ active +2 · @my_bot · ⤵14 ⤴11 · ⏱ 14:33
+telegram ⚠ awaiting pairing · send /start to @my_bot
+telegram ○ disconnected · /telegram-connect
+telegram ⦸ not configured · /telegram-setup
+telegram ✘ error Unable to connect. Is the computer able to access the url?
+```
+
+- `⤵N` counts messages received from the paired owner and `⤴N` counts messages the bridge delivered to Telegram (replies, menus and attachments; typing indicators, drafts and edits are not counted). `⏱` is the time of the latest one. Counters live in memory, start at zero when the extension loads, and are shown only while the bridge is up.
+- The state word is the same ladder as before: `not configured`, `awaiting pairing`, `electing`, `disconnected`, then `active` while a turn runs or is queued, and `connected`, `leader` or `follower` otherwise.
+- Messages a follower instance sends through the leader are counted by the leader process, not by the follower.
+- `/telegram-status` repeats the counters as a `- messages:` line.
+
 ### Tools available to the agent
 
 | Tool | Purpose |

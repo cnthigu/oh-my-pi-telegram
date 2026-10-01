@@ -257,9 +257,16 @@ export interface TelegramStatusBarState {
 }
 
 export interface TelegramStatusRuntimeContext {
+  /** Host run mode; the colored widget is only used in the interactive TUI. */
+  mode?: string;
   ui: {
     theme: TelegramStatusBarTheme;
-    setStatus: (key: string, text: string) => void;
+    setStatus(key: string, text: string | undefined): void;
+    setWidget?(
+      key: string,
+      content: string[] | undefined,
+      options?: { placement?: "aboveEditor" | "belowEditor" },
+    ): void;
   };
 }
 
@@ -590,13 +597,19 @@ export function createTelegramStatusRuntime<
   const statusKey = deps.statusKey ?? "telegram";
   return {
     updateStatus: (ctx, error) => {
-      ctx.ui.setStatus(
-        statusKey,
-        buildTelegramStatusBarText(
-          ctx.ui.theme,
-          deps.getStatusBarState(ctx, error),
-        ),
+      const text = buildTelegramStatusBarText(
+        ctx.ui.theme,
+        deps.getStatusBarState(ctx, error),
       );
+      if (ctx.mode === "tui" && ctx.ui.setWidget) {
+        // The host strips ANSI from status text, so setStatus would drop the
+        // theme colors. String widgets keep them; clear the plain footer entry
+        // so the state is not shown twice.
+        ctx.ui.setWidget(statusKey, [text], { placement: "belowEditor" });
+        ctx.ui.setStatus(statusKey, undefined);
+        return;
+      }
+      ctx.ui.setStatus(statusKey, text);
     },
     getStatusLines: (options) =>
       buildTelegramBridgeStatusLines(deps.getBridgeStatusLineState(), options),

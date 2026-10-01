@@ -318,6 +318,63 @@ test("Status runtime updates the status bar and exposes bridge lines", () => {
   ]);
 });
 
+test("Status runtime keeps theme colors in the TUI through a widget and stays plain elsewhere", () => {
+  const createContext = (mode: string | undefined) => {
+    const events: string[] = [];
+    return {
+      events,
+      ctx: {
+        mode,
+        ui: {
+          theme: statusBarTheme,
+          setStatus: (key: string, text: string | undefined) => {
+            events.push(`status:${key}:${text}`);
+          },
+          setWidget: (
+            key: string,
+            content: string[] | undefined,
+            options?: { placement?: string },
+          ) => {
+            events.push(`widget:${key}:${options?.placement}:${content?.join("|")}`);
+          },
+        },
+      },
+    };
+  };
+  const runtime = createTelegramStatusRuntime({
+    getStatusBarState: () => ({
+      hasBotToken: true,
+      pollingActive: true,
+      paired: true,
+      compactionInProgress: false,
+      processing: false,
+      queuedStatus: "",
+    }),
+    getBridgeStatusLineState: () => {
+      throw new Error("not used");
+    },
+  });
+
+  const tui = createContext("tui");
+  runtime.updateStatus(tui.ctx);
+  assert.equal(tui.events.length, 2);
+  assert.match(tui.events[0], /^widget:telegram:belowEditor:<accent>telegram<\/accent> <success>\S+ connected<\/success>$/);
+  assert.equal(tui.events[1], "status:telegram:undefined");
+
+  for (const mode of ["rpc", "json", "print", undefined]) {
+    const other = createContext(mode);
+    runtime.updateStatus(other.ctx);
+    assert.equal(other.events.length, 1, String(mode));
+    assert.match(other.events[0], /^status:telegram:<accent>telegram<\/accent> <success>\S+ connected<\/success>$/);
+  }
+
+  const noWidgetApi = createContext("tui");
+  delete (noWidgetApi.ctx.ui as { setWidget?: unknown }).setWidget;
+  runtime.updateStatus(noWidgetApi.ctx);
+  assert.equal(noWidgetApi.events.length, 1);
+  assert.match(noWidgetApi.events[0], /^status:telegram:/);
+});
+
 test("Status lines expose thread reconciliation state", () => {
   const lines = buildTelegramBridgeStatusLines({
     botUsername: "demo_bot",
