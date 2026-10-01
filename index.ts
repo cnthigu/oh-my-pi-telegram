@@ -43,6 +43,7 @@ import * as TelegramApi from "./lib/telegram-api.ts";
 import * as TextGroups from "./lib/text-groups.ts";
 import * as ThreadReconciler from "./lib/thread-reconciler.ts";
 import * as TimeInjection from "./lib/time-injection.ts";
+import * as Traffic from "./lib/traffic.ts";
 import * as Updates from "./lib/updates.ts";
 import * as Voice from "./lib/voice.ts";
 
@@ -274,11 +275,13 @@ export default function (pi: Pi.ExtensionAPI) {
       getFollowerThreadName: telegramBusFollowerRegistrationState.getThreadName,
       getCurrentIdentity: getCurrentInstanceThreadIdentity,
     });
+  const trafficCounters = Traffic.createTelegramTrafficCounters();
   const statusRuntime = Status.createTelegramBridgeStatusRuntime<
     Pi.ExtensionContext,
     Queue.TelegramQueueItem<Pi.ExtensionContext>
   >({
     getConfig: configStore.get,
+    getTraffic: trafficCounters.snapshot,
     getActiveProfileName: configStore.getActiveProfileName,
     getDiagnosticPaths: Paths.getTelegramDiagnosticsDisplayPaths,
     isPollingActive: Polling.createTelegramPollingActivityReader(
@@ -323,6 +326,12 @@ export default function (pi: Pi.ExtensionAPI) {
     getCwd: Pi.getExtensionContextCwd,
     recordRuntimeEvent,
   });
+  const trafficBridge = Traffic.createTelegramTrafficStatusBridge({
+    counters: trafficCounters,
+    getContext: telegramSessionContextStore.get,
+    updateStatus,
+    recordRuntimeEvent,
+  });
 
   // --- Telegram API ---
 
@@ -330,6 +339,7 @@ export default function (pi: Pi.ExtensionAPI) {
     TelegramApi.createDefaultTelegramBridgeApiRuntime({
       getBotToken: configStore.getBotToken,
       recordRuntimeEvent,
+      onCallSucceeded: trafficBridge.onCallSucceeded,
     });
   const telegramBusFollowerClients =
     BusFollower.createTelegramBusFollowerClientRuntime<
@@ -645,6 +655,7 @@ export default function (pi: Pi.ExtensionAPI) {
   const inboundRouteRuntime = Routing.createTelegramInboundRouteRuntime({
     configStore,
     callApi: callTelegramApi,
+    onAuthorizedMessage: trafficBridge.onAuthorizedMessage,
     getCurrentInstanceId() {
       return telegramInstanceId;
     },

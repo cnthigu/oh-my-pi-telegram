@@ -375,6 +375,8 @@ export interface TelegramBridgeApiRuntimeDeps {
     error: unknown,
     details?: Record<string, unknown>,
   ) => void;
+  /** Called after a Bot API call or multipart upload succeeded. */
+  onCallSucceeded?: (method: string) => void;
 }
 
 export interface TelegramBridgeApiRuntime {
@@ -1246,6 +1248,7 @@ export function createTelegramAssistantDraftSender(deps: {
 export function createDefaultTelegramBridgeApiRuntime(deps: {
   getBotToken: () => string | undefined;
   recordRuntimeEvent: TelegramBridgeApiRuntimeDeps["recordRuntimeEvent"];
+  onCallSucceeded?: TelegramBridgeApiRuntimeDeps["onCallSucceeded"];
 }): TelegramBridgeApiRuntime {
   return createTelegramBridgeApiRuntime({
     client: createTelegramApiClient(deps.getBotToken, {
@@ -1255,6 +1258,7 @@ export function createDefaultTelegramBridgeApiRuntime(deps: {
     maxFileSizeBytes: TELEGRAM_INBOUND_FILE_MAX_BYTES,
     tempFileMaxAgeMs: TELEGRAM_TEMP_FILE_MAX_AGE_MS,
     recordRuntimeEvent: deps.recordRuntimeEvent,
+    onCallSucceeded: deps.onCallSucceeded,
   });
 }
 
@@ -1266,8 +1270,9 @@ export function createTelegramBridgeApiRuntime(
     body: Record<string, unknown>,
     options?: TelegramApiCallOptions,
   ): Promise<TResponse> => {
+    let response: TResponse;
     try {
-      return await deps.client.call<TResponse>(method, body, options);
+      response = await deps.client.call<TResponse>(method, body, options);
     } catch (error) {
       deps.recordRuntimeEvent(
         "api",
@@ -1276,6 +1281,8 @@ export function createTelegramBridgeApiRuntime(
       );
       throw error;
     }
+    deps.onCallSucceeded?.(method);
+    return response;
   };
   return {
     call: callRecorded,
@@ -1285,16 +1292,17 @@ export function createTelegramBridgeApiRuntime(
      * photos, documents, animations, etc.).
      * Errors are recorded under the "multipart" category for diagnostics.
      */
-    callMultipart: async (
-      method,
-      fields,
-      fileField,
-      filePath,
-      fileName,
-      options,
-    ) => {
+    callMultipart: async <TResponse>(
+      method: string,
+      fields: Record<string, string>,
+      fileField: string,
+      filePath: string,
+      fileName: string,
+      options?: TelegramApiCallOptions,
+    ): Promise<TResponse> => {
+      let response: TResponse;
       try {
-        return await deps.client.callMultipart(
+        response = await deps.client.callMultipart<TResponse>(
           method,
           fields,
           fileField,
@@ -1310,6 +1318,8 @@ export function createTelegramBridgeApiRuntime(
         );
         throw error;
       }
+      deps.onCallSucceeded?.(method);
+      return response;
     },
 
     /**

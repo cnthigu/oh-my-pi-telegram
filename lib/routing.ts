@@ -554,6 +554,8 @@ export interface TelegramInboundRouteRuntimeDeps<
     method: string,
     body: Record<string, unknown>,
   ) => Promise<TResponse>;
+  /** Called for every message from the paired owner, before it is dispatched. */
+  onAuthorizedMessage?: (ctx: TContext) => void;
   getCurrentInstanceId?: () => string | undefined;
   getMessageOwnership?: Updates.TelegramMessageOwnershipLookup;
   getTargetOwnership?: Updates.TelegramTargetOwnershipLookup;
@@ -2086,6 +2088,7 @@ export function createTelegramInboundRouteRuntime<
     handleAuthorizedTelegramCallbackQuery: callbackHandler,
     sendTextReply: deps.sendTextReply,
     handleAuthorizedTelegramMessage: async (message, ctx) => {
+      deps.onAuthorizedMessage?.(ctx);
       if (typeof message.message_thread_id === "number") {
         await deps.handleTelegramThreadTargetObserved?.(
           {

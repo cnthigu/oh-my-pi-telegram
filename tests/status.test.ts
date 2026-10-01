@@ -111,246 +111,163 @@ test("Status runtime diagnostics scheduler coalesces snapshot persists", async (
   assert.deepEqual(errors, []);
 });
 
-test("Status bar text renders bridge connection and queue states", () => {
-  const theme = {
-    fg: (token: string, text: string) => `<${token}>${text}</${token}>`,
+const statusBarTheme = {
+  fg: (token: string, text: string) => `<${token}>${text}</${token}>`,
+};
+
+function plainStatusText(text: string): string {
+  return text.replace(/<\/?[a-z]+>/g, "");
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("Status bar text keeps the label, state color and queue for every connection state", () => {
+  const base = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: false,
+    queuedStatus: "",
   };
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: false,
-      pollingActive: false,
-      paired: false,
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <muted>not configured</muted>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      compactionInProgress: false,
-      processing: true,
-      queuedStatus: " +1",
-    }),
-    "<accent>telegram</accent> <warning>active</warning><success> +1</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      compactionInProgress: false,
-      processing: true,
-      processingStatus: "dispatching",
-      queuedStatus: " +1",
-    }),
-    "<accent>telegram</accent> <warning>active</warning><success> +1</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      compactionInProgress: false,
-      processing: true,
-      processingStatus: "active",
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <warning>active</warning>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      compactionInProgress: true,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <success>connected</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      compactionInProgress: true,
-      processing: true,
-      processingStatus: "active",
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <warning>active</warning>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      instanceThreadName: "Aurora",
-      compactionInProgress: false,
-      processing: true,
-      processingStatus: "queued",
-      queuedStatus: " +2",
-    }),
-    "<accent>telegram</accent> <muted>disconnected</muted><success> +2</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <success>follower</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      instanceThreadName: "Amber",
-      compactionInProgress: false,
-      processing: true,
-      processingStatus: "active",
-      queuedStatus: "",
-    }),
-    "<accent>Amber</accent> <warning>active</warning>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      busLifecyclePhase: "electing",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <warning>electing</warning>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busLifecyclePhase: "electing",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <warning>electing</warning>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      instanceThreadName: "Follower",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <success>follower</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      instanceThreadName: "Lname",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>Lname</accent> <success>follower</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      instanceSlot: "O",
-      instanceThreadName: "extensions Follower",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>extensions Follower</accent> <success>follower</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: false,
-      paired: true,
-      busRole: "follower",
-      instanceSlot: "O",
-      instanceThreadName: "Oname",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>Oname</accent> <success>follower</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      busRole: "leader",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>telegram</accent> <success>leader</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      busRole: "leader",
-      instanceThreadName: "🌙 A-identity",
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
-    }),
-    "<accent>🌙 A-identity</accent> <success>leader</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: false,
-      compactionInProgress: false,
-      processing: true,
-      processingStatus: "queued",
-      queuedStatus: " +1",
-    }),
-    "<accent>telegram</accent> <warning>awaiting pairing</warning><success> +1</success>",
-  );
-  assert.equal(
-    buildTelegramStatusBarText(theme, {
-      hasBotToken: true,
-      pollingActive: true,
-      paired: true,
-      compactionInProgress: false,
-      processing: false,
-      queuedStatus: "",
+  const cases: Array<{
+    state: Partial<Parameters<typeof buildTelegramStatusBarText>[1]>;
+    label: string;
+    token: string;
+    word: string;
+    queued?: string;
+  }> = [
+    { state: { hasBotToken: false, pollingActive: false, paired: false }, label: "telegram", token: "muted", word: "not configured" },
+    { state: { processing: true, queuedStatus: " +1" }, label: "telegram", token: "warning", word: "active", queued: " +1" },
+    { state: { processing: true, processingStatus: "dispatching", queuedStatus: " +1" }, label: "telegram", token: "warning", word: "active", queued: " +1" },
+    { state: { processing: true, processingStatus: "active" }, label: "telegram", token: "warning", word: "active" },
+    { state: { compactionInProgress: true }, label: "telegram", token: "success", word: "connected" },
+    { state: { compactionInProgress: true, processing: true, processingStatus: "active" }, label: "telegram", token: "warning", word: "active" },
+    { state: { pollingActive: false, instanceThreadName: "Aurora", processing: true, processingStatus: "queued", queuedStatus: " +2" }, label: "telegram", token: "muted", word: "disconnected", queued: " +2" },
+    { state: { pollingActive: false, busRole: "follower" }, label: "telegram", token: "success", word: "follower" },
+    { state: { pollingActive: false, busRole: "follower", instanceThreadName: "Amber", processing: true, processingStatus: "active" }, label: "Amber", token: "warning", word: "active" },
+    { state: { pollingActive: false, busRole: "follower", busLifecyclePhase: "electing" }, label: "telegram", token: "warning", word: "electing" },
+    { state: { pollingActive: false, busLifecyclePhase: "electing" }, label: "telegram", token: "warning", word: "electing" },
+    { state: { pollingActive: false, busRole: "follower", instanceThreadName: "Follower" }, label: "telegram", token: "success", word: "follower" },
+    { state: { pollingActive: false, busRole: "follower", instanceThreadName: "Lname" }, label: "Lname", token: "success", word: "follower" },
+    { state: { pollingActive: false, busRole: "follower", instanceSlot: "O", instanceThreadName: "extensions Follower" }, label: "extensions Follower", token: "success", word: "follower" },
+    { state: { pollingActive: false, busRole: "follower", instanceSlot: "O", instanceThreadName: "Oname" }, label: "Oname", token: "success", word: "follower" },
+    { state: { busRole: "leader" }, label: "telegram", token: "success", word: "leader" },
+    { state: { busRole: "leader", instanceThreadName: "🌙 A-identity" }, label: "🌙 A-identity", token: "success", word: "leader" },
+    { state: { paired: false, processing: true, processingStatus: "queued", queuedStatus: " +1" }, label: "telegram", token: "warning", word: "awaiting pairing", queued: " +1" },
+  ];
+  for (const { state, label, token, word, queued } of cases) {
+    const text = buildTelegramStatusBarText(statusBarTheme, { ...base, ...state });
+    const expected = new RegExp(
+      `^<accent>${escapeRegExp(label)}</accent> <${token}>\\S+ ${word}</${token}>${queued ? `<success>${escapeRegExp(queued)}</success>` : ""}`,
+    );
+    assert.match(text, expected, JSON.stringify(state));
+  }
+  assert.match(
+    buildTelegramStatusBarText(statusBarTheme, {
+      ...base,
       error: "typing failed",
     }),
-    "<accent>telegram</accent> <error>error</error> <muted>typing failed</muted>",
+    /^<accent>telegram<\/accent> <error>\S+ error<\/error> <muted>typing failed<\/muted>$/,
   );
+});
+
+test("Status bar shows bot, message counters and last activity only while the bridge is up", () => {
+  const lastAtMs = new Date(2026, 9, 1, 14, 32).getTime();
+  const connected = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: false,
+    queuedStatus: "",
+    botUsername: "demo_bot",
+    traffic: { received: 12, sent: 11, lastAtMs },
+  };
+  const up = plainStatusText(buildTelegramStatusBarText(statusBarTheme, connected));
+  assert.match(up, /connected/);
+  assert.match(up, /@demo_bot/);
+  assert.match(up, /12 \S*11/);
+  assert.match(up, /14:32/);
+
+  const withoutActivity = plainStatusText(
+    buildTelegramStatusBarText(statusBarTheme, {
+      ...connected,
+      traffic: { received: 0, sent: 0 },
+    }),
+  );
+  assert.match(withoutActivity, /0 \S*0/);
+  assert.doesNotMatch(withoutActivity, /\d\d:\d\d/);
+
+  const working = plainStatusText(
+    buildTelegramStatusBarText(statusBarTheme, {
+      ...connected,
+      processing: true,
+      processingStatus: "active",
+    }),
+  );
+  assert.match(working, /active/);
+  assert.match(working, /@demo_bot/);
+  assert.match(working, /12 \S*11/);
+
+  const offline = plainStatusText(
+    buildTelegramStatusBarText(statusBarTheme, { ...connected, pollingActive: false }),
+  );
+  assert.doesNotMatch(offline, /@demo_bot|14:32/);
+  assert.match(offline, /disconnected/);
+});
+
+test("Status bar tells the operator how to leave a non-working state", () => {
+  const base = {
+    hasBotToken: true,
+    pollingActive: false,
+    paired: true,
+    compactionInProgress: false,
+    processing: false,
+    queuedStatus: "",
+  };
+  assert.match(
+    plainStatusText(buildTelegramStatusBarText(statusBarTheme, { ...base, hasBotToken: false, paired: false })),
+    /\/telegram-setup/,
+  );
+  const pairing = plainStatusText(
+    buildTelegramStatusBarText(statusBarTheme, { ...base, paired: false, botUsername: "demo_bot" }),
+  );
+  assert.match(pairing, /\/start/);
+  assert.match(pairing, /@demo_bot/);
+  assert.match(
+    plainStatusText(buildTelegramStatusBarText(statusBarTheme, base)),
+    /\/telegram-connect/,
+  );
+});
+
+test("Status bar follows the host symbol preset and falls back without one", () => {
+  const state = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: false,
+    queuedStatus: "",
+    botUsername: "demo_bot",
+    traffic: { received: 3, sent: 2, lastAtMs: new Date(2026, 9, 1, 9, 5).getTime() },
+  };
+  const ascii = plainStatusText(
+    buildTelegramStatusBarText(
+      {
+        ...statusBarTheme,
+        status: { enabled: "[x]" },
+        sep: { dot: " - " },
+        icon: { input: "in:", output: "out:", time: "t:" },
+      },
+      state,
+    ),
+  );
+  assert.equal(ascii, "telegram [x] connected - @demo_bot - in:3 out:2 - t: 09:05");
+  const fallback = plainStatusText(buildTelegramStatusBarText(statusBarTheme, state));
+  assert.match(fallback, /^telegram \S+ connected · @demo_bot · \S*3 \S*2 · \S+ 09:05$/u);
 });
 
 test("Status runtime updates the status bar and exposes bridge lines", () => {
@@ -390,9 +307,9 @@ test("Status runtime updates the status bar and exposes bridge lines", () => {
     }),
   });
   runtime.updateStatus(ctx, "demo error");
-  assert.equal(
+  assert.match(
     events[0],
-    "telegram:<accent>telegram</accent> <error>error</error> <muted>demo error</muted>",
+    /^telegram:<accent>telegram<\/accent> <error>\S+ error<\/error> <muted>demo error<\/muted>$/,
   );
   assert.deepEqual(runtime.getStatusLines().slice(0, 3), [
     "connection:",
@@ -550,9 +467,9 @@ test("Bridge status runtime stays active while tools run after queue changes", (
       },
     },
   });
-  assert.equal(
+  assert.match(
     events[0],
-    "telegram:<accent>telegram</accent> <warning>active</warning>",
+    /^telegram:<accent>telegram<\/accent> <warning>\S+ active<\/warning>/,
   );
 });
 
@@ -589,9 +506,9 @@ test("Bridge status runtime builds status state from live ports", () => {
       },
     },
   });
-  assert.equal(
+  assert.match(
     events[0],
-    "telegram:<accent>telegram</accent> <warning>active</warning><success> +1</success>",
+    /^telegram:<accent>telegram<\/accent> <warning>\S+ active<\/warning><success> \+1<\/success>/,
   );
   assert.deepEqual(runtime.getStatusLines(), [
     "connection:",
