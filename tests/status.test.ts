@@ -10,6 +10,7 @@ import {
   buildTelegramBridgeStatusLines,
   buildTelegramRuntimeEventLines,
   buildTelegramStatusBarText,
+  buildTelegramStatusBarLines,
   clearTelegramStatusLineProviders,
   createTelegramBridgeStatusRuntime,
   createTelegramRuntimeDiagnosticsSnapshotScheduler,
@@ -19,6 +20,9 @@ import {
   createTelegramStatusSnapshot,
   createTelegramStatusRuntime,
   getTelegramStatusBarProcessingStatus,
+  formatTelegramWorkingMessage,
+  sanitizeTelegramStatusText,
+  summarizeTelegramStatusError,
   recordStructuredTelegramRuntimeEvent,
   recordTelegramRuntimeEvent,
   registerTelegramStatusLineProvider,
@@ -373,6 +377,179 @@ test("Status runtime keeps theme colors in the TUI through a widget and stays pl
   runtime.updateStatus(noWidgetApi.ctx);
   assert.equal(noWidgetApi.events.length, 1);
   assert.match(noWidgetApi.events[0], /^status:telegram:/);
+});
+
+test("Error summaries turn transport failures into a short state and next step", () => {
+  const cases: Array<[string, string | undefined, string | undefined, string | undefined]> = [
+    ["Telegram API getUpdates failed: HTTP 401: Unauthorized", "fatal", "invalid token", "/telegram-setup"],
+    ["Telegram API sendMessage failed: HTTP 429: Too Many Requests: retry after 12", "retrying", "rate limited 12s", "retrying"],
+    ["Telegram API sendMessage failed: HTTP 429", "retrying", "rate limited", "retrying"],
+    ["Conflict: terminated by other getUpdates request; make sure that only one bot instance is running", "attention", "another poller is active", "/telegram-status"],
+    ["Telegram API getUpdates failed: HTTP 502: Bad Gateway", "retrying", "Telegram unavailable", "retrying"],
+    ["Unable to connect. Is the computer able to access the url?", "retrying", "offline", "retrying"],
+    ["fetch failed", "retrying", "offline", "retrying"],
+    ["typing failed", undefined, undefined, undefined],
+    ["settingsManager.reload is not a function", undefined, undefined, undefined],
+  ];
+  for (const [message, kind, label, hint] of cases) {
+    const summary = summarizeTelegramStatusError(message);
+    assert.equal(summary?.kind, kind, message);
+    assert.equal(summary?.label, label, message);
+    assert.equal(summary?.hint, hint, message);
+  }
+});
+
+test("Status bar shows classified errors with their next step and keeps unknown ones verbatim", () => {
+  const base = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: false,
+    queuedStatus: "",
+  };
+  const fatal = buildTelegramStatusBarText(statusBarTheme, {
+    ...base,
+    error: "Telegram API getUpdates failed: HTTP 401: Unauthorized",
+  });
+  assert.match(fatal, /<error>\S+ invalid token<\/error>/);
+  assert.match(plainStatusText(fatal), /\/telegram-setup/);
+  const retrying = buildTelegramStatusBarText(statusBarTheme, {
+    ...base,
+    error: "Unable to connect. Is the computer able to access the url?",
+  });
+  assert.match(retrying, /<warning>\S+ offline<\/warning>/);
+  assert.match(plainStatusText(retrying), /retrying/);
+  const attention = buildTelegramStatusBarText(statusBarTheme, {
+    ...base,
+    error: "HTTP 409 Conflict",
+  });
+  assert.match(attention, /<warning>\S+ another poller is active<\/warning>/);
+  assert.match(plainStatusText(attention), /\/telegram-status/);
+  assert.match(
+    buildTelegramStatusBarText(statusBarTheme, { ...base, error: "typing failed" }),
+    /<error>\S+ error<\/error> <muted>typing failed<\/muted>/,
+  );
+  const long = plainStatusText(
+    buildTelegramStatusBarText(statusBarTheme, { ...base, error: "x".repeat(200) }),
+  );
+  assert.ok(long.includes("…"));
+  assert.equal(long.includes("x".repeat(101)), false);
+});
+
+test("Status bar lines carry no terminal control sequences from Telegram-controlled text", () => {
+  const hostile = "\u001b]0;pwned\u0007\u001b[31mred\u001b[0m\u202e";
+  const base = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: true,
+    queuedStatus: " +1",
+    instanceThreadName: `thread${hostile}`,
+    botUsername: `bot${hostile}`,
+    queuedPreview: [`queued${hostile}`],
+  };
+  const unsafe = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e]/;
+  for (const state of [
+    base,
+    { ...base, error: `boom${hostile}` },
+    { ...base, paired: false },
+  ]) {
+    for (const line of buildTelegramStatusBarLines(statusBarTheme, state)) {
+      assert.doesNotMatch(line, unsafe, JSON.stringify(line));
+    }
+  }
+  assert.equal(sanitizeTelegramStatusText(" a\u001b[0m  b\u0000 "), "a [0m b");
+});
+
+test("Status bar previews the next queued turns only while the bridge is up", () => {
+  const base = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: true,
+    queuedStatus: " +3",
+  };
+  const three = buildTelegramStatusBarLines(statusBarTheme, {
+    ...base,
+    queuedPreview: ["one", "two", "three"],
+  });
+  assert.equal(three.length, 2);
+  assert.match(plainStatusText(three[1]), /next: "one" · "two" · \+1 more/);
+  const two = buildTelegramStatusBarLines(statusBarTheme, {
+    ...base,
+    queuedPreview: ["one", "two"],
+  });
+  assert.match(plainStatusText(two[1]), /next: "one" · "two"$/);
+  for (const state of [
+    { ...base, queuedPreview: [] },
+    { ...base, queuedPreview: ["one"], pollingActive: false },
+    { ...base, queuedPreview: ["one"], paired: false },
+    { ...base, queuedPreview: ["one"], error: "typing failed" },
+  ]) {
+    assert.equal(buildTelegramStatusBarLines(statusBarTheme, state).length, 1, JSON.stringify(state));
+  }
+});
+
+test("Status bar surfaces failed deliveries only when there are some", () => {
+  const state = {
+    hasBotToken: true,
+    pollingActive: true,
+    paired: true,
+    compactionInProgress: false,
+    processing: false,
+    queuedStatus: "",
+    traffic: { received: 12, sent: 11, failed: 2 },
+  };
+  assert.match(plainStatusText(buildTelegramStatusBarText(statusBarTheme, state)), /12 \S*11 \S*2/);
+  const none = plainStatusText(
+    buildTelegramStatusBarText(statusBarTheme, {
+      ...state,
+      traffic: { received: 12, sent: 11, failed: 0 },
+    }),
+  );
+  assert.equal(none.includes("✘"), false);
+});
+
+test("Status runtime puts the queue preview in the widget and keeps the plain status to one line", () => {
+  const runtime = createTelegramStatusRuntime({
+    getStatusBarState: () => ({
+      hasBotToken: true,
+      pollingActive: true,
+      paired: true,
+      compactionInProgress: false,
+      processing: true,
+      queuedStatus: " +1",
+      queuedPreview: ["one"],
+    }),
+    getBridgeStatusLineState: () => {
+      throw new Error("not used");
+    },
+  });
+  const widgets: string[][] = [];
+  const statuses: Array<string | undefined> = [];
+  const ui = {
+    theme: statusBarTheme,
+    setStatus: (_key: string, text: string | undefined) => {
+      statuses.push(text);
+    },
+    setWidget: (_key: string, content: string[] | undefined) => {
+      widgets.push(content ?? []);
+    },
+  };
+  runtime.updateStatus({ mode: "tui", ui });
+  assert.equal(widgets[0].length, 2);
+  assert.match(plainStatusText(widgets[0][1]), /next: "one"/);
+  runtime.updateStatus({ mode: "rpc", ui });
+  assert.equal(statuses.at(-1)?.includes("next:"), false);
+});
+
+test("Working message names the Telegram prompt and ignores control characters", () => {
+  assert.equal(formatTelegramWorkingMessage("say pong"), 'Answering Telegram · "say pong"');
+  assert.equal(formatTelegramWorkingMessage("  "), "Answering Telegram");
+  assert.equal(formatTelegramWorkingMessage("a\u001b[0mb"), 'Answering Telegram · "a [0mb"');
 });
 
 test("Status lines expose thread reconciliation state", () => {

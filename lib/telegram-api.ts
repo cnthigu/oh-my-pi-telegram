@@ -377,6 +377,8 @@ export interface TelegramBridgeApiRuntimeDeps {
   ) => void;
   /** Called after a Bot API call or multipart upload succeeded. */
   onCallSucceeded?: (method: string) => void;
+  /** Called after a Bot API call or multipart upload failed for good. */
+  onCallFailed?: (method: string, error: unknown) => void;
 }
 
 export interface TelegramBridgeApiRuntime {
@@ -1249,6 +1251,7 @@ export function createDefaultTelegramBridgeApiRuntime(deps: {
   getBotToken: () => string | undefined;
   recordRuntimeEvent: TelegramBridgeApiRuntimeDeps["recordRuntimeEvent"];
   onCallSucceeded?: TelegramBridgeApiRuntimeDeps["onCallSucceeded"];
+  onCallFailed?: TelegramBridgeApiRuntimeDeps["onCallFailed"];
 }): TelegramBridgeApiRuntime {
   return createTelegramBridgeApiRuntime({
     client: createTelegramApiClient(deps.getBotToken, {
@@ -1259,6 +1262,7 @@ export function createDefaultTelegramBridgeApiRuntime(deps: {
     tempFileMaxAgeMs: TELEGRAM_TEMP_FILE_MAX_AGE_MS,
     recordRuntimeEvent: deps.recordRuntimeEvent,
     onCallSucceeded: deps.onCallSucceeded,
+    onCallFailed: deps.onCallFailed,
   });
 }
 
@@ -1279,6 +1283,7 @@ export function createTelegramBridgeApiRuntime(
         error,
         withTelegramTransportDiagnostics(error, { method }),
       );
+      deps.onCallFailed?.(method, error);
       throw error;
     }
     deps.onCallSucceeded?.(method);
@@ -1316,6 +1321,7 @@ export function createTelegramBridgeApiRuntime(
           error,
           withTelegramTransportDiagnostics(error, { method, fileName }),
         );
+        deps.onCallFailed?.(method, error);
         throw error;
       }
       deps.onCallSucceeded?.(method);

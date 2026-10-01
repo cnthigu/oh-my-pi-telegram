@@ -163,6 +163,7 @@ export function createTelegramPollingControllerRuntime<
       updateStatus: deps.updateStatus,
       sleep: deps.sleep,
       maxUpdateFailures: deps.maxUpdateFailures,
+      onRecovered: deps.onRecovered,
       recordRuntimeEvent: deps.recordRuntimeEvent,
     }),
     updateStatus: deps.updateStatus,
@@ -913,6 +914,8 @@ export interface TelegramPollLoopDeps<
   onStatusReset: () => void;
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   maxUpdateFailures?: number;
+  /** Called on the first successful poll after a failed attempt. */
+  onRecovered?: () => void;
 }
 
 export interface TelegramPollLoopRunnerDeps<
@@ -930,6 +933,8 @@ export interface TelegramPollLoopRunnerDeps<
   updateStatus: (ctx: TContext, message?: string) => void;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   maxUpdateFailures?: number;
+  /** Called on the first successful poll after a failed attempt. */
+  onRecovered?: (ctx: TContext) => void;
 }
 
 export function sleepTelegramPollingRetry(
@@ -994,6 +999,15 @@ export function createTelegramPollLoopRunner<
       },
       sleep,
       maxUpdateFailures: deps.maxUpdateFailures,
+      onRecovered: () => {
+        try {
+          deps.onRecovered?.(ctx);
+        } catch (error) {
+          deps.recordRuntimeEvent?.("polling", error, {
+            phase: "recovered-notice",
+          });
+        }
+      },
       recordRuntimeEvent: deps.recordRuntimeEvent,
     });
 }
@@ -1041,6 +1055,7 @@ export async function runTelegramPollLoop<
   const admittedUpdates = new Set<number>();
   let handledUpdateFailureRethrown = false;
   let consecutiveGetUpdatesConflicts = 0;
+  let failing = false;
   while (!deps.signal.aborted) {
     try {
       const updates = await deps.getUpdates(
@@ -1048,6 +1063,10 @@ export async function runTelegramPollLoop<
         deps.signal,
       );
       consecutiveGetUpdatesConflicts = 0;
+      if (failing) {
+        failing = false;
+        deps.onRecovered?.();
+      }
       for (const update of updates) {
         if (admittedUpdates.has(update.update_id)) {
           deps.config.lastUpdateId = update.update_id;
@@ -1105,6 +1124,7 @@ export async function runTelegramPollLoop<
         continue;
       }
       consecutiveGetUpdatesConflicts = 0;
+      failing = true;
       deps.onErrorStatus(getTelegramPollingErrorMessage(error));
       await deps.sleep(TELEGRAM_POLLING_RETRY_MS, deps.signal);
       if (deps.signal.aborted) return;

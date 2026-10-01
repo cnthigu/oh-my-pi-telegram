@@ -777,6 +777,8 @@ export interface TelegramUserPairingRuntimeDeps<TContext> {
   setAllowedUserId: (userId: number) => void;
   persistConfig: () => Promise<void>;
   updateStatus: (ctx: TContext) => void;
+  /** Called once the user was accepted as owner and the config persisted. */
+  onPaired?: (userId: number, ctx: TContext) => void;
 }
 
 export interface TelegramUserPairingRuntime<TContext> {
@@ -827,13 +829,16 @@ export function createTelegramUserPairingRuntime<TContext>(
   deps: TelegramUserPairingRuntimeDeps<TContext>,
 ): TelegramUserPairingRuntime<TContext> {
   return {
-    pairIfNeeded: (userId, ctx) =>
-      pairTelegramUserIfNeeded(userId, {
+    pairIfNeeded: async (userId, ctx) => {
+      const paired = await pairTelegramUserIfNeeded(userId, {
         allowedUserId: deps.getAllowedUserId(),
         ctx,
         setAllowedUserId: deps.setAllowedUserId,
         persistConfig: deps.persistConfig,
         updateStatus: deps.updateStatus,
-      }),
+      });
+      if (paired) deps.onPaired?.(userId, ctx);
+      return paired;
+    },
   };
 }

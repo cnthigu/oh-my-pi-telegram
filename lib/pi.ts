@@ -260,6 +260,27 @@ export function isTerminalAgentEnd(event: AgentEndEvent): boolean {
   return !("willContinue" in event && event.willContinue === true);
 }
 
+/** Show a one-off toast in the host UI; a no-op where the host has no UI. */
+export function notifyExtensionContext(
+  ctx: ExtensionContext,
+  message: string,
+  level: "info" | "warning" | "error",
+): void {
+  ctx.ui.notify(message, level);
+}
+
+/**
+ * Replace the host spinner text, or restore its default with `undefined`.
+ * Pi-compatible hosts do not all expose `setWorkingMessage`; the spinner text
+ * is cosmetic, so a host without it is skipped instead of failing the turn.
+ */
+export function setExtensionWorkingMessage(
+  ctx: ExtensionContext,
+  message?: string,
+): void {
+  ctx.ui.setWorkingMessage?.(message);
+}
+
 export function isExtensionContextIdle(ctx: ExtensionContext): boolean {
   return ctx.isIdle();
 }

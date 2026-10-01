@@ -639,6 +639,70 @@ test("Poll loop keeps the paired user when the offset is committed after the ini
   assert.equal(saved.lastUpdateId, 2);
 });
 
+test("Poll loop reports recovery once, only after a failed attempt", async () => {
+  const run = async (failures: number): Promise<string[]> => {
+    const events: string[] = [];
+    let calls = 0;
+    const runPollLoop = createTelegramPollLoopRunner({
+      getConfig: () => ({ botToken: "123:abc", lastUpdateId: 1 }),
+      deleteWebhook: async () => {},
+      getUpdates: async () => {
+        calls += 1;
+        if (calls <= failures) throw new Error("network down");
+        if (calls <= failures + 2) return [];
+        throw new DOMException("stop", "AbortError");
+      },
+      persistConfig: async () => {},
+      handleUpdate: async () => {},
+      updateStatus: (_ctx: string, message?: string) => {
+        events.push(`status:${message ?? "ok"}`);
+      },
+      onRecovered: (ctx: string) => {
+        events.push(`recovered:${ctx}`);
+      },
+      sleep: async () => {},
+    });
+    await runPollLoop("ctx", new AbortController().signal);
+    return events;
+  };
+  assert.deepEqual(await run(2), [
+    "status:network down",
+    "status:ok",
+    "status:network down",
+    "status:ok",
+    "recovered:ctx",
+  ]);
+  assert.deepEqual(await run(0), []);
+});
+
+test("Poll loop keeps polling when the recovery notice itself fails", async () => {
+  const recorded: string[] = [];
+  let calls = 0;
+  const runPollLoop = createTelegramPollLoopRunner({
+    getConfig: () => ({ botToken: "123:abc", lastUpdateId: 1 }),
+    deleteWebhook: async () => {},
+    getUpdates: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("network down");
+      if (calls === 2) return [];
+      throw new DOMException("stop", "AbortError");
+    },
+    persistConfig: async () => {},
+    handleUpdate: async () => {},
+    updateStatus: () => {},
+    onRecovered: () => {
+      throw new Error("toast broke");
+    },
+    sleep: async () => {},
+    recordRuntimeEvent: (category, error, details) => {
+      recorded.push(`${category}:${(error as Error).message}:${details?.phase}`);
+    },
+  });
+  await runPollLoop("ctx", new AbortController().signal);
+  assert.equal(calls, 3);
+  assert.ok(recorded.includes("polling:toast broke:recovered-notice"), recorded.join("|"));
+});
+
 test("Poll loop runner ignores stale-context status failures while retrying", async () => {
   const config = { botToken: "123:abc", lastUpdateId: 1 };
   const events: string[] = [];

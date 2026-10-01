@@ -24,6 +24,7 @@ import * as MenuQueue from "./lib/menu-queue.ts";
 import * as MenuSettings from "./lib/menu-settings.ts";
 import * as Menu from "./lib/menu.ts";
 import * as Model from "./lib/model.ts";
+import * as Notices from "./lib/notices.ts";
 import * as Outbound from "./lib/outbound.ts";
 import * as Ownership from "./lib/ownership.ts";
 import * as Paths from "./lib/paths.ts";
@@ -295,6 +296,7 @@ export default function (pi: Pi.ExtensionAPI) {
     hasPendingModelSwitch: pendingModelSwitchStore.has,
     getQueuedItems: telegramQueueStore.getQueuedItems,
     formatQueuedStatus: Queue.formatQueuedTelegramItemsStatus,
+    getQueuedPreview: Queue.formatQueuedTelegramItemsPreview,
     getRecentRuntimeEvents: runtimeEvents.getEvents,
     getRuntimeLockState: lockRuntime.getStatusLabel,
     ...threadStatusProjectionRuntime,
@@ -326,11 +328,17 @@ export default function (pi: Pi.ExtensionAPI) {
     getCwd: Pi.getExtensionContextCwd,
     recordRuntimeEvent,
   });
+  const notices = Notices.createTelegramNoticeRuntime({
+    getContext: telegramSessionContextStore.get,
+    notify: Pi.notifyExtensionContext,
+    recordRuntimeEvent,
+  });
   const trafficBridge = Traffic.createTelegramTrafficStatusBridge({
     counters: trafficCounters,
     getContext: telegramSessionContextStore.get,
     updateStatus,
     recordRuntimeEvent,
+    onDeliveryFailed: notices.deliveryFailed,
   });
 
   // --- Telegram API ---
@@ -340,6 +348,7 @@ export default function (pi: Pi.ExtensionAPI) {
       getBotToken: configStore.getBotToken,
       recordRuntimeEvent,
       onCallSucceeded: trafficBridge.onCallSucceeded,
+      onCallFailed: trafficBridge.onCallFailed,
     });
   const telegramBusFollowerClients =
     BusFollower.createTelegramBusFollowerClientRuntime<
@@ -656,6 +665,7 @@ export default function (pi: Pi.ExtensionAPI) {
     configStore,
     callApi: callTelegramApi,
     onAuthorizedMessage: trafficBridge.onAuthorizedMessage,
+    onPaired: notices.paired,
     getCurrentInstanceId() {
       return telegramInstanceId;
     },
@@ -833,6 +843,7 @@ export default function (pi: Pi.ExtensionAPI) {
     stopTypingLoop: typing.stop,
     updateStatus,
     recordRuntimeEvent,
+    onRecovered: notices.recovered,
   });
   const recoverStaleTelegramTopicApiError = function (
     apiBody: unknown,

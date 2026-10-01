@@ -19,6 +19,8 @@ import {
   hasExtensionContextPendingMessages,
   isExtensionContextIdle,
   isExtensionContextPassiveRunMode,
+  notifyExtensionContext,
+  setExtensionWorkingMessage,
 } from "../lib/pi.ts";
 
 type PiRuntimeApiHarness = Parameters<
@@ -168,4 +170,25 @@ test("Pi context model prefers omp's live models facade over a frozen ctx.model"
   const piCtx = { model: frozen } as unknown as ExtensionContext;
   assert.equal(getExtensionContextModel(ompCtx), live);
   assert.equal(getExtensionContextModel(piCtx), frozen);
+});
+
+test("Host UI helpers forward to the context and tolerate a host without a spinner API", () => {
+  const calls: string[] = [];
+  const full = {
+    ui: {
+      notify: (message: string, level: string) => {
+        calls.push(`notify:${level}:${message}`);
+      },
+      setWorkingMessage: (message?: string) => {
+        calls.push(`working:${message}`);
+      },
+    },
+  } as unknown as ExtensionContext;
+  notifyExtensionContext(full, "hello", "warning");
+  setExtensionWorkingMessage(full, "busy");
+  setExtensionWorkingMessage(full, undefined);
+  assert.deepEqual(calls, ["notify:warning:hello", "working:busy", "working:undefined"]);
+
+  const withoutSpinner = { ui: {} } as unknown as ExtensionContext;
+  assert.doesNotThrow(() => setExtensionWorkingMessage(withoutSpinner, "busy"));
 });

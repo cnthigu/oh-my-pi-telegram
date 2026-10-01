@@ -329,6 +329,8 @@ export function registerTelegramLifecycleRuntimeHooks({
   updateStatus,
   recordRuntimeEvent,
 }: TelegramLifecycleBindingDeps): void {
+  // Whether this bridge set the host spinner text, so it only clears its own.
+  let telegramWorkingMessageShown = false;
   const agentEndResetter = Runtime.createTelegramAgentEndResetter({
     abort,
     typing,
@@ -589,6 +591,14 @@ export function registerTelegramLifecycleRuntimeHooks({
       await agentStartWithDedupReset(event, ctx);
       activityRuntime.onAgentStart(activeTurnRuntime.get()?.target);
       startAgentActivityTypingLoop(ctx);
+      const telegramTurn = activeTurnRuntime.get();
+      if (telegramTurn) {
+        Pi.setExtensionWorkingMessage(
+          ctx,
+          Status.formatTelegramWorkingMessage(telegramTurn.statusSummary),
+        );
+        telegramWorkingMessageShown = true;
+      }
     },
     async onToolExecutionStart(event, ctx) {
       if (!isSessionContextActive(ctx)) return;
@@ -638,6 +648,10 @@ export function registerTelegramLifecycleRuntimeHooks({
     onAgentSettled(_event, ctx) {
       if (!isSessionContextActive(ctx)) return;
       activityRuntime.onAgentSettled();
+      if (telegramWorkingMessageShown) {
+        telegramWorkingMessageShown = false;
+        Pi.setExtensionWorkingMessage(ctx, undefined);
+      }
     },
     settleOnTerminalAgentEnd: Pi.isOmpHost(pi),
     onBeforeAgentStart: Prompts.createTelegramProactiveBeforeAgentStartHook({

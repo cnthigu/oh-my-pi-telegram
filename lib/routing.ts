@@ -556,6 +556,8 @@ export interface TelegramInboundRouteRuntimeDeps<
   ) => Promise<TResponse>;
   /** Called for every message from the paired owner, before it is dispatched. */
   onAuthorizedMessage?: (ctx: TContext) => void;
+  /** Called when the first Telegram user is accepted as the bridge owner. */
+  onPaired?: (userId: number, ctx: TContext) => void;
   getCurrentInstanceId?: () => string | undefined;
   getMessageOwnership?: Updates.TelegramMessageOwnershipLookup;
   getTargetOwnership?: Updates.TelegramTargetOwnershipLookup;
@@ -2076,6 +2078,7 @@ export function createTelegramInboundRouteRuntime<
     setAllowedUserId: deps.configStore.setAllowedUserId,
     persistConfig: deps.configStore.persist,
     updateStatus: deps.updateStatus,
+    onPaired: deps.onPaired,
     removePendingMediaGroupMessages: deps.mediaGroupRuntime.removeMessages,
     removeQueuedTelegramTurnsByMessageIds:
       deps.queueMutationRuntime.removeByMessageIds,

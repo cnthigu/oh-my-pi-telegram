@@ -48,6 +48,7 @@ import {
   executeTelegramControlItemRuntime,
   executeTelegramQueueDispatchPlan,
   formatQueuedTelegramItemsStatus,
+  formatQueuedTelegramItemsPreview,
   getNextTelegramToolExecutionCount,
   getTelegramQueueItemAdmissionMode,
   getTelegramQueueLaneContract,
@@ -403,6 +404,42 @@ test("Control-lane items sort before priority and default prompt items", () => {
     items.map((item) => item?.statusSummary),
     ["control", "priority", "default"],
   );
+});
+
+test("Queued item preview lists summaries in dispatch order and skips empty ones", () => {
+  const defaultPrompt: TelegramQueueItem = createQueueTestPromptTurn({
+    queueOrder: 10,
+    queueLane: "default",
+    laneOrder: 0,
+    statusSummary: "default",
+  });
+  const emptyPrompt: TelegramQueueItem = createQueueTestPromptTurn({
+    queueOrder: 13,
+    queueLane: "default",
+    laneOrder: 1,
+    statusSummary: "   ",
+  });
+  const priorityPrompt: TelegramQueueItem = createQueueTestPromptTurn({
+    queueOrder: 11,
+    queueLane: "priority",
+    laneOrder: 0,
+    statusSummary: "priority",
+  });
+  const controlItem: TelegramQueueItem = createQueueTestControlItem({
+    queueOrder: 12,
+    statusSummary: "control",
+  });
+  const stored = [defaultPrompt, emptyPrompt, controlItem, priorityPrompt];
+  assert.deepEqual(formatQueuedTelegramItemsPreview(stored), [
+    "control",
+    "priority",
+    "default",
+  ]);
+  assert.deepEqual(
+    stored.map((item) => item.statusSummary),
+    ["default", "   ", "control", "priority"],
+  );
+  assert.deepEqual(formatQueuedTelegramItemsPreview([]), []);
 });
 
 test("Queue mutation helpers remove prompt items by Telegram message id", () => {

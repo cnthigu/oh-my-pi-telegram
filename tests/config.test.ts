@@ -683,6 +683,29 @@ test("Telegram config pairing runtime binds config and status ports", async () =
   assert.deepEqual(events, ["set:7", "persist", "status:ctx"]);
 });
 
+test("Telegram config pairing runtime reports the new owner only after persisting", async () => {
+  const events: string[] = [];
+  let allowedUserId: number | undefined;
+  const runtime = createTelegramUserPairingRuntime({
+    getAllowedUserId: () => allowedUserId,
+    setAllowedUserId: (userId) => {
+      allowedUserId = userId;
+    },
+    persistConfig: async () => {
+      events.push("persist");
+    },
+    updateStatus: () => {
+      events.push("status");
+    },
+    onPaired: (userId, ctx: string) => {
+      events.push(`paired:${userId}:${ctx}`);
+    },
+  });
+  assert.equal(await runtime.pairIfNeeded(7, "ctx"), true);
+  assert.equal(await runtime.pairIfNeeded(8, "ctx"), false);
+  assert.deepEqual(events, ["persist", "status", "paired:7:ctx"]);
+});
+
 test("Bot token input prefers stored config over env vars", () => {
   const value = getTelegramBotTokenInputDefault(
     {

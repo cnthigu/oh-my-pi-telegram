@@ -11,6 +11,8 @@ export interface TelegramTrafficSnapshot {
   received: number;
   /** Messages the bridge delivered to Telegram since the bridge loaded. */
   sent: number;
+  /** Messages that could not be delivered after the transport retries. */
+  failed: number;
   /** Time of the latest received or sent message, when there was one. */
   lastAtMs?: number;
 }
@@ -18,6 +20,7 @@ export interface TelegramTrafficSnapshot {
 export interface TelegramTrafficCounters {
   recordReceived: () => void;
   recordSent: () => void;
+  recordFailed: () => void;
   snapshot: () => TelegramTrafficSnapshot;
 }
 
@@ -48,6 +51,7 @@ export function createTelegramTrafficCounters(
 ): TelegramTrafficCounters {
   let received = 0;
   let sent = 0;
+  let failed = 0;
   let lastAtMs: number | undefined;
   return {
     recordReceived() {
@@ -58,9 +62,13 @@ export function createTelegramTrafficCounters(
       sent += 1;
       lastAtMs = now();
     },
+    recordFailed() {
+      failed += 1;
+    },
     snapshot: () => ({
       received,
       sent,
+      failed,
       ...(lastAtMs === undefined ? {} : { lastAtMs }),
     }),
   };
@@ -76,11 +84,15 @@ export interface TelegramTrafficStatusBridgeDeps<TContext> {
     error: unknown,
     details?: Record<string, unknown>,
   ) => void;
+  /** Told about every message delivery that failed, e.g. to raise a notice. */
+  onDeliveryFailed?: (error: unknown) => void;
 }
 
 export interface TelegramTrafficStatusBridge<TContext> {
   /** Observer for successful Bot API calls; counts delivered messages. */
   onCallSucceeded: (method: string) => void;
+  /** Observer for failed Bot API calls; counts undelivered messages. */
+  onCallFailed: (method: string, error: unknown) => void;
   /** Observer for messages accepted from the paired owner. */
   onAuthorizedMessage: (ctx: TContext) => void;
 }
@@ -104,6 +116,13 @@ export function createTelegramTrafficStatusBridge<TContext>(
     onCallSucceeded(method) {
       if (!isTelegramOutboundMessageMethod(method)) return;
       deps.counters.recordSent();
+      const ctx = deps.getContext();
+      if (ctx !== undefined) refreshStatus(ctx);
+    },
+    onCallFailed(method, error) {
+      if (!isTelegramOutboundMessageMethod(method)) return;
+      deps.counters.recordFailed();
+      deps.onDeliveryFailed?.(error);
       const ctx = deps.getContext();
       if (ctx !== undefined) refreshStatus(ctx);
     },
