@@ -157,3 +157,15 @@ test("Pi context helpers expose model, idle, pending-message, and compact adapte
   assert.equal(hasExtensionContextPendingMessages(ctx), false);
   assert.deepEqual(events, ["compact", "complete"]);
 });
+
+test("Pi context model prefers omp's live models facade over a frozen ctx.model", () => {
+  const frozen = { provider: "fake", id: "fake-1" };
+  const live = { provider: "fake", id: "fake-2" };
+  const ompCtx = {
+    model: frozen,
+    models: { current: () => live },
+  } as unknown as ExtensionContext;
+  const piCtx = { model: frozen } as unknown as ExtensionContext;
+  assert.equal(getExtensionContextModel(ompCtx), live);
+  assert.equal(getExtensionContextModel(piCtx), frozen);
+});

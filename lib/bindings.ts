@@ -639,6 +639,7 @@ export function registerTelegramLifecycleRuntimeHooks({
       if (!isSessionContextActive(ctx)) return;
       activityRuntime.onAgentSettled();
     },
+    settleOnTerminalAgentEnd: Pi.isOmpHost(pi),
     onBeforeAgentStart: Prompts.createTelegramProactiveBeforeAgentStartHook({
       isConfigured: configStore.hasBotToken,
       isProactivePushEnabled,

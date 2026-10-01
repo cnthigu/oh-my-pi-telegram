@@ -560,3 +560,38 @@ test("Lifecycle helpers register pi hooks and delegate to handlers", async () =>
     "agent-end",
   ]);
 });
+
+test("Terminal agent_end synthesizes agent_settled only for hosts that never emit it", async () => {
+  const cases = [
+    { settle: true, event: { messages: [] }, expected: ["agent-end", "agent-settled"] },
+    { settle: true, event: { messages: [], willContinue: true }, expected: ["agent-end"] },
+    { settle: false, event: { messages: [] }, expected: ["agent-end"] },
+  ];
+  for (const { settle, event, expected } of cases) {
+    const harness = createLifecycleApiHarness();
+    const events: string[] = [];
+    registerTelegramLifecycleHooks(harness.api, {
+      settleOnTerminalAgentEnd: settle,
+      onSessionStart: async () => {},
+      onSessionShutdown: async () => {},
+      onBeforeAgentStart: () => undefined,
+      onModelSelect: () => {},
+      onAgentStart: async () => {},
+      onToolExecutionStart: () => {},
+      onToolExecutionEnd: () => {},
+      onMessageStart: async () => {},
+      onMessageUpdate: async () => {},
+      onAgentEnd: async () => {
+        events.push("agent-end");
+      },
+      onAgentSettled: () => {
+        events.push("agent-settled");
+      },
+    });
+    await getRequiredLifecycleHandler(harness.handlers, "agent_end")(
+      event,
+      createLifecycleContext(),
+    );
+    assert.deepEqual(events, expected, JSON.stringify({ settle, event }));
+  }
+});

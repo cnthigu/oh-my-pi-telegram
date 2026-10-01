@@ -51,6 +51,7 @@ type ActivePiModel = NonNullable<Pi.ExtensionContext["model"]>;
 // --- Extension Runtime ---
 
 export default function (pi: Pi.ExtensionAPI) {
+  Paths.setHostAgentDirResolver(Pi.getHostAgentDir);
   const piRuntime = Pi.createExtensionApiRuntimePorts(pi);
   const {
     getCommands,
@@ -397,6 +398,7 @@ export default function (pi: Pi.ExtensionAPI) {
   const currentModelRuntime = Model.createCurrentModelRuntime({
     getContextModel,
     updateStatus,
+    preferContextModel: Pi.isOmpHost(pi),
   });
   const queueMutationRuntime = Queue.createTelegramQueueMutationController({
     ...telegramQueueStore,
@@ -698,10 +700,12 @@ export default function (pi: Pi.ExtensionAPI) {
     resolveTimeLine: timeInjectionRuntime.resolveLine,
     getThinkingLevel,
     setThinkingLevel,
-    persistScopedModelPatterns: Pi.createScopedModelPatternPersister({
-      createSettingsManager: Pi.createSettingsManager,
-      clearCachedModelMenuInputs: modelMenuRuntime.clearCachedInputs,
-    }),
+    persistScopedModelPatterns: Pi.isOmpHost(pi)
+      ? undefined
+      : Pi.createScopedModelPatternPersister({
+          createSettingsManager: Pi.createSettingsManager,
+          clearCachedModelMenuInputs: modelMenuRuntime.clearCachedInputs,
+        }),
     setModel,
     sendUserMessage,
     isIdle,

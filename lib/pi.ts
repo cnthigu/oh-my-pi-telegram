@@ -20,6 +20,7 @@ import {
   type SessionStartEvent,
   type SlashCommandInfo,
   SettingsManager,
+  getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 
 export type {
@@ -38,6 +39,13 @@ export type {
   SessionStartEvent,
   SlashCommandInfo,
 };
+
+/**
+ * Agent data directory owned by the host runtime. Pi returns its own root and
+ * omp's legacy Pi shim forwards omp's profile-aware directory, so no argv or
+ * executable sniffing is needed.
+ */
+export { getAgentDir as getHostAgentDir };
 
 export interface ToolExecutionStartEvent {
   type: "tool_execution_start";
@@ -67,6 +75,26 @@ export interface PiSettingsManager {
   flush: () => Promise<void>;
   getEnabledModels: () => string[] | undefined;
   setEnabledModels: (patterns: string[] | undefined) => void;
+}
+
+/**
+ * omp's `Settings` is what its legacy shim returns from
+ * `SettingsManager.create()`. It has no `reload()` or `get/setEnabledModels()`:
+ * it reloads through `reloadFromDisk()` and keeps `enabledModels` as a
+ * path-scoped typed setting.
+ */
+interface OmpSettingsSurface {
+  reloadFromDisk: () => Promise<void>;
+  flush: () => Promise<void>;
+  getGlobalSettings: () => { enabledModels?: unknown };
+}
+
+function isOmpSettings(value: object): value is OmpSettingsSurface {
+  return (
+    "reloadFromDisk" in value &&
+    "flush" in value &&
+    "getGlobalSettings" in value
+  );
 }
 
 export type PiSlashCommandInfo = SlashCommandInfo;
@@ -150,7 +178,22 @@ export function createExtensionApiRuntimePorts(
 }
 
 export function createSettingsManager(cwd: string): PiSettingsManager {
-  return SettingsManager.create(cwd);
+  const manager: PiSettingsManager = SettingsManager.create(cwd);
+  if (!isOmpSettings(manager)) return manager;
+  return {
+    reload: () => manager.reloadFromDisk(),
+    flush: () => manager.flush(),
+    getEnabledModels: () => {
+      const enabled = manager.getGlobalSettings().enabledModels;
+      return Array.isArray(enabled) &&
+        enabled.every((pattern) => typeof pattern === "string")
+        ? enabled
+        : undefined;
+    },
+    setEnabledModels: () => {
+      throw new Error("Scoped model persistence is not supported on omp.");
+    },
+  };
 }
 
 export function createScopedModelPatternPersister(deps: {
@@ -167,14 +210,54 @@ export function createScopedModelPatternPersister(deps: {
   };
 }
 
+interface OmpModelQuery {
+  current: () => ExtensionContext["model"];
+}
+
+function hasOmpModelQuery(
+  ctx: ExtensionContext,
+): ctx is ExtensionContext & { models: OmpModelQuery } {
+  return (
+    "models" in ctx &&
+    typeof ctx.models === "object" &&
+    ctx.models !== null &&
+    "current" in ctx.models &&
+    typeof ctx.models.current === "function"
+  );
+}
+
+/**
+ * omp builds command contexts by spreading a base context, which evaluates the
+ * `model` getter once: a context stored from `/telegram-connect` would report
+ * the model of that moment forever. omp's `ctx.models.current()` closes over
+ * the live session model, so prefer it when present.
+ */
 export function getExtensionContextModel(
   ctx: ExtensionContext,
 ): ExtensionContext["model"] {
-  return ctx.model;
+  return hasOmpModelQuery(ctx) ? ctx.models.current() : ctx.model;
 }
 
 export function getExtensionContextCwd(ctx: ExtensionContext): string {
   return ctx.cwd;
+}
+
+/**
+ * True when the extension API belongs to omp. omp's `ExtensionAPI` carries
+ * `typebox` and `pi` module facades that upstream Pi's API does not have.
+ */
+export function isOmpHost(api: ExtensionAPI): boolean {
+  return "typebox" in api && "pi" in api;
+}
+
+/**
+ * omp marks an `agent_end` with `willContinue: true` whenever it already
+ * scheduled a retry, compaction continuation, todo/plan reminder, or async
+ * wake. Any other `agent_end` is terminal, which is what Pi reports through
+ * `agent_settled`.
+ */
+export function isTerminalAgentEnd(event: AgentEndEvent): boolean {
+  return !("willContinue" in event && event.willContinue === true);
 }
 
 export function isExtensionContextIdle(ctx: ExtensionContext): boolean {
