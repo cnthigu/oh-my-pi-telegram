@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `Time Injection`: Reject non-finite configured intervals and resume time annotations after the wall clock moves backwards.
+- `Paths`: Resolve diagnostic paths from the current agent directory and profile instead of reporting hard-coded `~/.pi` locations.
+- `Security`: Apply the `brace-expansion` `5.0.12` override at both root and coding-agent scopes to address the latest recursion and expansion denial-of-service advisories.
+
 - **Security overrides refreshed** — `protobufjs` `7.6.4` → `7.6.6`, `undici` `8.5.0` → `8.10.2`, and a new `brace-expansion` `5.0.9` override keep `npm audit` at 0 vulnerabilities; the `validate` gate (`typecheck` → `test` → `audit` → `pack:check`) passes again.
 - **README rewritten** to the repository audit standard: verified install/build/test commands, the real `omp install` syntax, omp agent-directory resolution, and an explicit limitations section.
 - **Release notes extraction fixed** — the `0.22.0-evandro.1` fork section promoted from `###` to `##` so `.github/workflows/release.yml` can build release notes for tag `v0.22.0-evandro.1`.

@@ -669,7 +669,7 @@ export function resolveTelegramTimeConfig(
       ? raw.injectionMode
       : "hidden";
   const interval =
-    typeof raw?.interval === "number" && raw.interval > 0
+    typeof raw?.interval === "number" && Number.isFinite(raw.interval) && raw.interval > 0
       ? raw.interval
       : 60 * 60 * 1000;
   const timezone = getSystemTimezone();

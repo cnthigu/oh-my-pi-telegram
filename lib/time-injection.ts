@@ -67,6 +67,7 @@ export function createTimeInjectionRuntime(
       const nowMs = now.getTime();
       if (
         previous !== undefined &&
+        nowMs >= previous &&
         nowMs - previous < config.interval
       ) {
         return null;

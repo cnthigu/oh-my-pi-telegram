@@ -12,7 +12,7 @@
 
 > Fork of [`@llblab/pi-telegram@0.22.0`](https://github.com/llblab/pi-telegram/tree/v0.22.0) (SHA `afe09c5`), republished as `@evandrodevbr/oh-my-pi-telegram` for `omp`.
 > Lineage: `badlogic/pi-telegram` → `llblab/pi-telegram` (0.22.0) → **this fork**.
-> The fork adds `omp` compatibility metadata in `package.json` and this README; the runtime code is upstream 0.22.0.
+> The fork is based on upstream 0.22.0, with `omp` compatibility metadata and local runtime fixes recorded in `CHANGELOG.md`.
 
 ## About
 
@@ -249,3 +249,9 @@ The test suite is deterministic and offline: transport calls are injected, so no
 ## License
 
 MIT. See [`LICENSE`](LICENSE), which keeps the copyright notices of the upstream chain (`badlogic/pi-telegram`, `llblab/pi-telegram`) alongside this fork's.
+
+## Review checks (2026-09-30)
+
+Diagnostics report the resolved agent directory, including `omp` and `PI_CODING_AGENT_DIR` overrides, with isolated profile suffixes. Interval time injection recovers after a backward wall-clock adjustment and rejects non-finite intervals. The `brace-expansion` security override is updated to 5.0.12.
+
+Focused offline checks: `node --experimental-strip-types --test tests/time-injection.test.ts tests/paths.test.ts tests/config.test.ts tests/status.test.ts`, followed by `npm run typecheck`. The Domain DAG check remains part of architecture validation. Run `npm run validate` in an environment that permits Unix-domain sockets; this review's restricted environment blocks the bus socket tests. No live bot, Telegram client or Windows IPC session was used.
