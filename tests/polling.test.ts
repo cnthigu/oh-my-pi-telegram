@@ -4,6 +4,9 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -29,6 +32,7 @@ import {
   stopTelegramPollingRuntime,
   TELEGRAM_ALLOWED_UPDATES,
 } from "../lib/polling.ts";
+import { createTelegramConfigStore } from "../lib/config.ts";
 
 const TEST_CONTEXT = "ctx";
 
@@ -599,6 +603,40 @@ test("Poll loop runner binds config, status, and transport ports", async () => {
   });
   await runPollLoop("ctx", new AbortController().signal);
   assert.deepEqual(events, ["deleteWebhook", "handle:ctx:6", "persist:6"]);
+});
+
+test("Poll loop keeps the paired user when the offset is committed after the initial sync replaced the stored config", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "telegram-pairing-"));
+  const configPath = join(dir, "telegram.json");
+  const store = createTelegramConfigStore({ agentDir: dir, configPath });
+  await store.load();
+  store.update((config) => {
+    config.botToken = "123:abc";
+  });
+  await store.persist();
+  let calls = 0;
+  const runPollLoop = createTelegramPollLoopRunner({
+    getConfig: store.get,
+    deleteWebhook: async () => {},
+    getUpdates: async () => {
+      calls += 1;
+      if (calls === 1) return [{ update_id: 1 }]; // initial sync
+      if (calls === 2) return [{ update_id: 2 }]; // the owner's /start
+      throw new DOMException("stop", "AbortError");
+    },
+    persistConfig: store.persist,
+    handleUpdate: async () => {
+      store.setAllowedUserId(777);
+      await store.persist();
+    },
+    updateStatus: () => {},
+    sleep: async () => {},
+  });
+  await runPollLoop("ctx", new AbortController().signal);
+  assert.equal(store.getAllowedUserId(), 777);
+  const saved = JSON.parse(readFileSync(configPath, "utf8"));
+  assert.equal(saved.allowedUserId, 777);
+  assert.equal(saved.lastUpdateId, 2);
 });
 
 test("Poll loop runner ignores stale-context status failures while retrying", async () => {

@@ -971,7 +971,15 @@ export function createTelegramPollLoopRunner<
       config: deps.getConfig(),
       deleteWebhook: deps.deleteWebhook,
       getUpdates: deps.getUpdates,
-      persistConfig: deps.persistConfig,
+      // The loop keeps the config object captured when polling started, but the
+      // store swaps in a fresh object on every persist. Persisting that stale
+      // copy erased later changes such as the paired user, so only the poll
+      // offset is carried onto the store's current config.
+      persistConfig: (polled) => {
+        const current = deps.getConfig();
+        current.lastUpdateId = polled.lastUpdateId;
+        return deps.persistConfig(current);
+      },
       handleUpdate: deps.handleUpdate,
       onErrorStatus: (message) => {
         updateTelegramPollingStatusSafely(deps.updateStatus, ctx, {
