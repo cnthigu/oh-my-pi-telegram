@@ -1055,16 +1055,32 @@ export async function runTelegramPollLoop<
   const admittedUpdates = new Set<number>();
   let handledUpdateFailureRethrown = false;
   let consecutiveGetUpdatesConflicts = 0;
-  let failing = false;
+  // An error status is on screen; it stays until polling works again, so a
+  // slow retry (for example a long rate-limit wait) never shows as healthy.
+  let errorShown = false;
+  // The last getUpdates failed, so the next successful one is a recovery.
+  // Failures of an update handler do not count: the transport kept working.
+  let transportDown = false;
+  const showError = (message: string): void => {
+    errorShown = true;
+    deps.onErrorStatus(message);
+  };
   while (!deps.signal.aborted) {
+    let inGetUpdates = false;
     try {
+      inGetUpdates = true;
       const updates = await deps.getUpdates(
         buildTelegramLongPollRequest(deps.config.lastUpdateId),
         deps.signal,
       );
+      inGetUpdates = false;
       consecutiveGetUpdatesConflicts = 0;
-      if (failing) {
-        failing = false;
+      if (errorShown) {
+        errorShown = false;
+        deps.onStatusReset();
+      }
+      if (transportDown) {
+        transportDown = false;
         deps.onRecovered?.();
       }
       for (const update of updates) {
@@ -1095,7 +1111,7 @@ export async function runTelegramPollLoop<
             throw error;
           }
           const message = getTelegramPollingErrorMessage(error);
-          deps.onErrorStatus(
+          showError(
             `skipping Telegram update ${update.update_id} after ${failureCount} failures: ${message}`,
           );
           admittedUpdates.add(update.update_id);
@@ -1124,11 +1140,10 @@ export async function runTelegramPollLoop<
         continue;
       }
       consecutiveGetUpdatesConflicts = 0;
-      failing = true;
-      deps.onErrorStatus(getTelegramPollingErrorMessage(error));
+      if (inGetUpdates) transportDown = true;
+      showError(getTelegramPollingErrorMessage(error));
       await deps.sleep(TELEGRAM_POLLING_RETRY_MS, deps.signal);
       if (deps.signal.aborted) return;
-      deps.onStatusReset();
     }
   }
 }

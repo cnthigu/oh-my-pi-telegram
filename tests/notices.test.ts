@@ -61,11 +61,16 @@ test("Delivery failures explain the reason and pick a severity from it", () => {
   harness.runtime.deliveryFailed(new Error("Telegram API sendMessage failed: HTTP 401: Unauthorized"));
   harness.advance(TELEGRAM_DELIVERY_FAILED_NOTICE_COOLDOWN_MS);
   harness.runtime.deliveryFailed(new Error("message is too long"));
+  harness.advance(TELEGRAM_DELIVERY_FAILED_NOTICE_COOLDOWN_MS);
+  harness.runtime.deliveryFailed(
+    new Error("Telegram API sendRichMessage may have committed before transport failed."),
+  );
   assert.deepEqual(harness.notices, [
     "warning|session|Telegram: reply not delivered (rate limited 12s)",
     "warning|session|Telegram: reply not delivered (offline)",
     "error|session|Telegram: reply not delivered (invalid token)",
     "error|session|Telegram: reply not delivered (message is too long)",
+    "warning|session|Telegram: reply delivery unconfirmed (check the chat)",
   ]);
 });
 

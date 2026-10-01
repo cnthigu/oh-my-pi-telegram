@@ -388,6 +388,7 @@ test("Error summaries turn transport failures into a short state and next step",
     ["Telegram API getUpdates failed: HTTP 502: Bad Gateway", "retrying", "Telegram unavailable", "retrying"],
     ["Unable to connect. Is the computer able to access the url?", "retrying", "offline", "retrying"],
     ["fetch failed", "retrying", "offline", "retrying"],
+    ["Telegram API sendRichMessage may have committed before transport failed.", "attention", "delivery unconfirmed", undefined],
     ["typing failed", undefined, undefined, undefined],
     ["settingsManager.reload is not a function", undefined, undefined, undefined],
   ];

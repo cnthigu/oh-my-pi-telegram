@@ -36,22 +36,26 @@ export interface TelegramNoticeRuntime<TContext> {
 }
 
 function describeTelegramDeliveryFailure(error: unknown): {
-  reason: string;
+  message: string;
   level: TelegramNoticeLevel;
 } {
   const message = error instanceof Error ? error.message : String(error);
   const summary = summarizeTelegramStatusError(message);
+  if (summary?.deliveryUnknown) {
+    return {
+      message: "Telegram: reply delivery unconfirmed (check the chat)",
+      level: "warning",
+    };
+  }
   if (summary) {
     return {
-      reason: summary.label,
+      message: `Telegram: reply not delivered (${summary.label})`,
       level: summary.kind === "fatal" ? "error" : "warning",
     };
   }
   const raw = sanitizeTelegramStatusText(message);
-  return {
-    reason: raw.length > 80 ? `${raw.slice(0, 79)}…` : raw,
-    level: "error",
-  };
+  const reason = raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
+  return { message: `Telegram: reply not delivered (${reason})`, level: "error" };
 }
 
 /**
@@ -93,8 +97,8 @@ export function createTelegramNoticeRuntime<TContext>(
         return;
       }
       lastDeliveryNoticeAtMs = nowMs;
-      const { reason, level } = describeTelegramDeliveryFailure(error);
-      show(ctx, `Telegram: reply not delivered (${reason})`, level);
+      const failure = describeTelegramDeliveryFailure(error);
+      show(ctx, failure.message, failure.level);
     },
   };
 }

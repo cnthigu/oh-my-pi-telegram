@@ -908,6 +908,11 @@ export interface TelegramStatusErrorSummary {
   hint?: string;
   /** fatal needs the operator, attention needs a look, retrying heals itself. */
   kind: "fatal" | "attention" | "retrying";
+  /**
+   * The failed call may still have reached Telegram: a non-idempotent send hit
+   * a transport failure after the request left, so the outcome is unknown.
+   */
+  deliveryUnknown?: boolean;
 }
 
 /**
@@ -917,6 +922,13 @@ export interface TelegramStatusErrorSummary {
 export function summarizeTelegramStatusError(
   message: string,
 ): TelegramStatusErrorSummary | undefined {
+  if (/may have committed before transport failed/i.test(message)) {
+    return {
+      kind: "attention",
+      label: "delivery unconfirmed",
+      deliveryUnknown: true,
+    };
+  }
   if (/HTTP 401\b|\bUnauthorized\b/i.test(message)) {
     return { kind: "fatal", label: "invalid token", hint: "/telegram-setup" };
   }
