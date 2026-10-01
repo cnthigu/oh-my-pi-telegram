@@ -850,6 +850,7 @@ export function createTelegramPairedUpdateRuntime<
       setAllowedUserId: deps.setAllowedUserId,
       persistConfig: deps.persistConfig,
       updateStatus: deps.updateStatus,
+      onPaired: deps.onPaired,
     }).pairIfNeeded,
     answerCallbackQuery: deps.answerCallbackQuery,
     answerGuestQuery: deps.answerGuestQuery,

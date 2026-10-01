@@ -4,6 +4,9 @@
  */
 
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -29,6 +32,7 @@ import {
   stopTelegramPollingRuntime,
   TELEGRAM_ALLOWED_UPDATES,
 } from "../lib/polling.ts";
+import { createTelegramConfigStore } from "../lib/config.ts";
 
 const TEST_CONTEXT = "ctx";
 
@@ -601,6 +605,103 @@ test("Poll loop runner binds config, status, and transport ports", async () => {
   assert.deepEqual(events, ["deleteWebhook", "handle:ctx:6", "persist:6"]);
 });
 
+test("Poll loop keeps the paired user when the offset is committed after the initial sync replaced the stored config", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "telegram-pairing-"));
+  const configPath = join(dir, "telegram.json");
+  const store = createTelegramConfigStore({ agentDir: dir, configPath });
+  await store.load();
+  store.update((config) => {
+    config.botToken = "123:abc";
+  });
+  await store.persist();
+  let calls = 0;
+  const runPollLoop = createTelegramPollLoopRunner({
+    getConfig: store.get,
+    deleteWebhook: async () => {},
+    getUpdates: async () => {
+      calls += 1;
+      if (calls === 1) return [{ update_id: 1 }]; // initial sync
+      if (calls === 2) return [{ update_id: 2 }]; // the owner's /start
+      throw new DOMException("stop", "AbortError");
+    },
+    persistConfig: store.persist,
+    handleUpdate: async () => {
+      store.setAllowedUserId(777);
+      await store.persist();
+    },
+    updateStatus: () => {},
+    sleep: async () => {},
+  });
+  await runPollLoop("ctx", new AbortController().signal);
+  assert.equal(store.getAllowedUserId(), 777);
+  const saved = JSON.parse(readFileSync(configPath, "utf8"));
+  assert.equal(saved.allowedUserId, 777);
+  assert.equal(saved.lastUpdateId, 2);
+});
+
+test("Poll loop reports recovery once, only after a failed attempt", async () => {
+  const run = async (failures: number): Promise<string[]> => {
+    const events: string[] = [];
+    let calls = 0;
+    const runPollLoop = createTelegramPollLoopRunner({
+      getConfig: () => ({ botToken: "123:abc", lastUpdateId: 1 }),
+      deleteWebhook: async () => {},
+      getUpdates: async () => {
+        calls += 1;
+        if (calls <= failures) throw new Error("network down");
+        if (calls <= failures + 2) return [];
+        throw new DOMException("stop", "AbortError");
+      },
+      persistConfig: async () => {},
+      handleUpdate: async () => {},
+      updateStatus: (_ctx: string, message?: string) => {
+        events.push(`status:${message ?? "ok"}`);
+      },
+      onRecovered: (ctx: string) => {
+        events.push(`recovered:${ctx}`);
+      },
+      sleep: async () => {},
+    });
+    await runPollLoop("ctx", new AbortController().signal);
+    return events;
+  };
+  assert.deepEqual(await run(2), [
+    "status:network down",
+    "status:network down",
+    "status:ok",
+    "recovered:ctx",
+  ]);
+  assert.deepEqual(await run(0), []);
+});
+
+test("Poll loop keeps polling when the recovery notice itself fails", async () => {
+  const recorded: string[] = [];
+  let calls = 0;
+  const runPollLoop = createTelegramPollLoopRunner({
+    getConfig: () => ({ botToken: "123:abc", lastUpdateId: 1 }),
+    deleteWebhook: async () => {},
+    getUpdates: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("network down");
+      if (calls === 2) return [];
+      throw new DOMException("stop", "AbortError");
+    },
+    persistConfig: async () => {},
+    handleUpdate: async () => {},
+    updateStatus: () => {},
+    onRecovered: () => {
+      throw new Error("toast broke");
+    },
+    sleep: async () => {},
+    recordRuntimeEvent: (category, error, details) => {
+      recorded.push(`${category}:${(error as Error).message}:${details?.phase}`);
+    },
+  });
+  await runPollLoop("ctx", new AbortController().signal);
+  assert.equal(calls, 3);
+  assert.ok(recorded.includes("polling:toast broke:recovered-notice"), recorded.join("|"));
+});
+
 test("Poll loop runner ignores stale-context status failures while retrying", async () => {
   const config = { botToken: "123:abc", lastUpdateId: 1 };
   const events: string[] = [];
@@ -612,6 +713,7 @@ test("Poll loop runner ignores stale-context status failures while retrying", as
     getUpdates: async () => {
       calls += 1;
       if (calls === 1) throw new Error("network down");
+      if (calls === 2) return [];
       throw new DOMException("stop", "AbortError");
     },
     persistConfig: async () => {},
@@ -635,6 +737,74 @@ test("Poll loop runner ignores stale-context status failures while retrying", as
     "polling:stale ctx:status-update",
     "polling:stale ctx:status-update",
   ]);
+});
+
+test("Poll loop keeps the error status until a poll succeeds", async () => {
+  const events: string[] = [];
+  let calls = 0;
+  await runTelegramPollLoop({
+    ctx: TEST_CONTEXT,
+    signal: new AbortController().signal,
+    config: { botToken: "123:abc", lastUpdateId: 1 },
+    deleteWebhook: async () => {},
+    getUpdates: async () => {
+      calls += 1;
+      if (calls <= 2) throw new Error("rate limited");
+      if (calls === 3) return [];
+      throw new DOMException("stop", "AbortError");
+    },
+    persistConfig: async () => {},
+    handleUpdate: async () => {},
+    onErrorStatus: (message) => {
+      events.push(`error:${message}`);
+    },
+    onStatusReset: () => {
+      events.push("reset");
+    },
+    sleep: async () => {
+      events.push("sleep");
+    },
+  });
+  assert.deepEqual(events, [
+    "error:rate limited",
+    "sleep",
+    "error:rate limited",
+    "sleep",
+    "reset",
+  ]);
+});
+
+test("Poll loop does not report recovery when only an update handler failed", async () => {
+  const events: string[] = [];
+  let calls = 0;
+  await runTelegramPollLoop({
+    ctx: TEST_CONTEXT,
+    signal: new AbortController().signal,
+    config: { botToken: "123:abc", lastUpdateId: 1 },
+    maxUpdateFailures: 3,
+    deleteWebhook: async () => {},
+    getUpdates: async () => {
+      calls += 1;
+      if (calls <= 3) return [{ update_id: 6 }];
+      throw new DOMException("stop", "AbortError");
+    },
+    persistConfig: async () => {},
+    handleUpdate: async () => {
+      throw new Error("handler failed");
+    },
+    onErrorStatus: (message) => {
+      events.push(`error:${message}`);
+    },
+    onStatusReset: () => {
+      events.push("reset");
+    },
+    onRecovered: () => {
+      events.push("recovered");
+    },
+    sleep: async () => {},
+  });
+  assert.equal(events.includes("recovered"), false, events.join("|"));
+  assert.ok(events.includes("reset"), events.join("|"));
 });
 
 test("Poll loop initializes lastUpdateId and processes updates", async () => {
@@ -893,6 +1063,7 @@ test("Poll loop reports retryable errors and sleeps before retrying", async () =
       if (calls === 1) {
         throw new Error("network down");
       }
+      if (calls === 2) return [];
       throw new DOMException("stop", "AbortError");
     },
     persistConfig: async () => {},

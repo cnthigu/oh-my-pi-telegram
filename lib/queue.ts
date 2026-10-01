@@ -499,6 +499,25 @@ export function formatQueuedTelegramItemsStatus<TContext = unknown>(
   return items.length === 0 ? "" : ` +${items.length}`;
 }
 
+/**
+ * Summaries of the waiting items in dispatch order, for the status preview.
+ * Display must never break the status update, so a malformed item only
+ * costs the ordering.
+ */
+export function formatQueuedTelegramItemsPreview<TContext = unknown>(
+  items: TelegramQueueItem<TContext>[],
+): string[] {
+  let ordered = items;
+  try {
+    ordered = [...items].sort(compareTelegramQueueItems);
+  } catch {
+    // Keep the store order.
+  }
+  return ordered
+    .map((item) => item.statusSummary.trim())
+    .filter((summary) => summary.length > 0);
+}
+
 export function truncateTelegramQueueSummary(
   text: string,
   maxWords = 5,

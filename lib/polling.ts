@@ -163,6 +163,7 @@ export function createTelegramPollingControllerRuntime<
       updateStatus: deps.updateStatus,
       sleep: deps.sleep,
       maxUpdateFailures: deps.maxUpdateFailures,
+      onRecovered: deps.onRecovered,
       recordRuntimeEvent: deps.recordRuntimeEvent,
     }),
     updateStatus: deps.updateStatus,
@@ -913,6 +914,8 @@ export interface TelegramPollLoopDeps<
   onStatusReset: () => void;
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   maxUpdateFailures?: number;
+  /** Called on the first successful poll after a failed attempt. */
+  onRecovered?: () => void;
 }
 
 export interface TelegramPollLoopRunnerDeps<
@@ -930,6 +933,8 @@ export interface TelegramPollLoopRunnerDeps<
   updateStatus: (ctx: TContext, message?: string) => void;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   maxUpdateFailures?: number;
+  /** Called on the first successful poll after a failed attempt. */
+  onRecovered?: (ctx: TContext) => void;
 }
 
 export function sleepTelegramPollingRetry(
@@ -971,7 +976,15 @@ export function createTelegramPollLoopRunner<
       config: deps.getConfig(),
       deleteWebhook: deps.deleteWebhook,
       getUpdates: deps.getUpdates,
-      persistConfig: deps.persistConfig,
+      // The loop keeps the config object captured when polling started, but the
+      // store swaps in a fresh object on every persist. Persisting that stale
+      // copy erased later changes such as the paired user, so only the poll
+      // offset is carried onto the store's current config.
+      persistConfig: (polled) => {
+        const current = deps.getConfig();
+        current.lastUpdateId = polled.lastUpdateId;
+        return deps.persistConfig(current);
+      },
       handleUpdate: deps.handleUpdate,
       onErrorStatus: (message) => {
         updateTelegramPollingStatusSafely(deps.updateStatus, ctx, {
@@ -986,6 +999,15 @@ export function createTelegramPollLoopRunner<
       },
       sleep,
       maxUpdateFailures: deps.maxUpdateFailures,
+      onRecovered: () => {
+        try {
+          deps.onRecovered?.(ctx);
+        } catch (error) {
+          deps.recordRuntimeEvent?.("polling", error, {
+            phase: "recovered-notice",
+          });
+        }
+      },
       recordRuntimeEvent: deps.recordRuntimeEvent,
     });
 }
@@ -1033,13 +1055,34 @@ export async function runTelegramPollLoop<
   const admittedUpdates = new Set<number>();
   let handledUpdateFailureRethrown = false;
   let consecutiveGetUpdatesConflicts = 0;
+  // An error status is on screen; it stays until polling works again, so a
+  // slow retry (for example a long rate-limit wait) never shows as healthy.
+  let errorShown = false;
+  // The last getUpdates failed, so the next successful one is a recovery.
+  // Failures of an update handler do not count: the transport kept working.
+  let transportDown = false;
+  const showError = (message: string): void => {
+    errorShown = true;
+    deps.onErrorStatus(message);
+  };
   while (!deps.signal.aborted) {
+    let inGetUpdates = false;
     try {
+      inGetUpdates = true;
       const updates = await deps.getUpdates(
         buildTelegramLongPollRequest(deps.config.lastUpdateId),
         deps.signal,
       );
+      inGetUpdates = false;
       consecutiveGetUpdatesConflicts = 0;
+      if (errorShown) {
+        errorShown = false;
+        deps.onStatusReset();
+      }
+      if (transportDown) {
+        transportDown = false;
+        deps.onRecovered?.();
+      }
       for (const update of updates) {
         if (admittedUpdates.has(update.update_id)) {
           deps.config.lastUpdateId = update.update_id;
@@ -1068,7 +1111,7 @@ export async function runTelegramPollLoop<
             throw error;
           }
           const message = getTelegramPollingErrorMessage(error);
-          deps.onErrorStatus(
+          showError(
             `skipping Telegram update ${update.update_id} after ${failureCount} failures: ${message}`,
           );
           admittedUpdates.add(update.update_id);
@@ -1097,10 +1140,10 @@ export async function runTelegramPollLoop<
         continue;
       }
       consecutiveGetUpdatesConflicts = 0;
-      deps.onErrorStatus(getTelegramPollingErrorMessage(error));
+      if (inGetUpdates) transportDown = true;
+      showError(getTelegramPollingErrorMessage(error));
       await deps.sleep(TELEGRAM_POLLING_RETRY_MS, deps.signal);
       if (deps.signal.aborted) return;
-      deps.onStatusReset();
     }
   }
 }

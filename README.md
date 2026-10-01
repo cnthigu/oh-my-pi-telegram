@@ -130,6 +130,36 @@ Config is written to `<agent-dir>/telegram.json`. The agent directory is `PI_COD
 
 Profile names: lowercase ASCII letters and digits, up to 32 characters; `default`, `main` and `active` are reserved. Profiles keep isolated polling, diagnostics, Threaded Mode state and local bus transport.
 
+### Status line
+
+The bridge keeps one live line under the `omp` editor. In the interactive TUI it is a themed widget (`omp` strips color from plain extension status text, so the widget is what keeps the theme colors); in RPC, JSON and print modes it falls back to a plain status entry. The glyphs follow `omp`'s `symbolPreset` (`unicode`, `nerd` or `ascii`).
+
+```text
+telegram ● connected · @my_bot · ⤵12 ⤴11 · ⏱ 14:32
+telegram ⟳ active +3 · @my_bot · ⤵14 ⤴11 · ⏱ 14:33
+  next: "second prompt" · "third prompt" · +1 more
+telegram ● connected · @my_bot · ⤵12 ⤴10 ✘2 · ⏱ 14:32
+telegram ⚠ awaiting pairing · send /start to @my_bot
+telegram ○ disconnected · /telegram-connect
+telegram ⦸ not configured · /telegram-setup
+telegram ✘ invalid token · /telegram-setup
+telegram ⟳ rate limited 12s · retrying
+telegram ⟳ offline · retrying
+telegram ⚠ another poller is active · /telegram-status
+telegram ✘ error <unrecognized message>
+```
+
+- `⤵N` counts messages received from the paired owner and `⤴N` counts messages the bridge delivered to Telegram (replies, menus and attachments; typing indicators, drafts and edits are not counted). `✘N` appears only when some deliveries failed or could not be confirmed. `⏱` is the time of the latest message. Counters live in memory, start at zero when the extension loads, and are shown only while the bridge is up.
+- The state word is the same ladder as before: `not configured`, `awaiting pairing`, `electing`, `disconnected`, then `active` while a turn runs or is queued, and `connected`, `leader` or `follower` otherwise.
+- While turns wait, a second line previews the next two in dispatch order and how many more follow.
+- Transport and API failures are classified into a short state with the next step: HTTP 401 (`invalid token`), 429 (`rate limited`), 409 (`another poller is active`), 5xx (`Telegram unavailable`) and network errors (`offline`). Anything unrecognized stays visible verbatim, trimmed to 100 characters.
+- An error stays on screen until a poll succeeds again, so a slow retry is never shown as healthy. The API client waits out a rate limit itself, so `rate limited` appears once those waits are exhausted, not at the first 429.
+- Toasts: `Telegram paired with user <id>`, `Telegram reconnected`, and `Telegram: reply not delivered (<reason>)`. When a send hit a transport failure after the request left, the outcome is unknown and the toast says `reply delivery unconfirmed (check the chat)`. Delivery failure toasts are throttled to one per 30 seconds.
+- While a turn that arrived from Telegram runs, the `omp` spinner reads `Answering Telegram · "<prompt>"`.
+- Widget lines bypass the host's text sanitizer, so every Telegram-controlled string shown there (thread name, bot name, queued prompts, error text) is stripped of control characters and bidi overrides.
+- Messages a follower instance sends through the leader are counted by the leader process, not by the follower.
+- `/telegram-status` repeats the counters as a `- messages:` line.
+
 ### Tools available to the agent
 
 | Tool | Purpose |

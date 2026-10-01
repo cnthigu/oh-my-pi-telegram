@@ -4,6 +4,15 @@
  * Builds usage, cost, and context summaries for the interactive Telegram status view
  */
 
+/** Message counters the status shows; structurally satisfied by the traffic domain. */
+export interface TelegramStatusTraffic {
+  received: number;
+  sent: number;
+  /** Deliveries that failed after the transport retries; absent means none. */
+  failed?: number;
+  lastAtMs?: number;
+}
+
 export type TelegramStatusQueueLane = "control" | "priority" | "default";
 
 export interface TelegramUsageStats {
@@ -191,6 +200,7 @@ export interface TelegramBridgeStatusLineState {
   instanceSlot?: string;
   instanceThreadName?: string;
   lockState?: string;
+  traffic?: TelegramStatusTraffic;
   pollingActive: boolean;
   lastUpdateId?: number;
   activeSourceMessageIds?: number[];
@@ -215,12 +225,28 @@ export interface TelegramStatusBarTheme {
     token: "accent" | "error" | "muted" | "warning" | "success",
     text: string,
   ) => string;
+  /**
+   * omp symbol presets (unicode, nerd font, ascii) so the status follows the
+   * user's glyph set. Hosts that do not expose them get the unicode fallbacks.
+   */
+  status?: {
+    enabled?: string;
+    shadowed?: string;
+    running?: string;
+    warning?: string;
+    error?: string;
+    disabled?: string;
+  };
+  sep?: { dot?: string };
+  icon?: { input?: string; output?: string; time?: string };
 }
 
 export interface TelegramStatusBarState {
   hasBotToken: boolean;
   pollingActive: boolean;
   paired: boolean;
+  botUsername?: string;
+  traffic?: TelegramStatusTraffic;
   busRole?: TelegramBridgeBusRole;
   busLifecyclePhase?: TelegramBridgeBusLifecyclePhase;
   instanceSlot?: string;
@@ -229,13 +255,22 @@ export interface TelegramStatusBarState {
   processing: boolean;
   processingStatus?: string;
   queuedStatus: string;
+  /** Summaries of the queued turns, in dispatch order. */
+  queuedPreview?: string[];
   error?: string;
 }
 
 export interface TelegramStatusRuntimeContext {
+  /** Host run mode; the colored widget is only used in the interactive TUI. */
+  mode?: string;
   ui: {
     theme: TelegramStatusBarTheme;
-    setStatus: (key: string, text: string) => void;
+    setStatus(key: string, text: string | undefined): void;
+    setWidget?(
+      key: string,
+      content: string[] | undefined,
+      options?: { placement?: "aboveEditor" | "belowEditor" },
+    ): void;
   };
 }
 
@@ -272,6 +307,7 @@ export interface TelegramBridgeStatusRuntimeDeps<
   hasPendingModelSwitch: () => boolean;
   getQueuedItems: () => TQueueItem[];
   formatQueuedStatus: (items: TQueueItem[]) => string;
+  getQueuedPreview?: (items: TQueueItem[]) => string[];
   getRecentRuntimeEvents: () => TelegramRuntimeEvent[];
   getRuntimeLockState?: () => string;
   getBusRole?: () => TelegramBridgeBusRole | undefined;
@@ -298,6 +334,7 @@ export interface TelegramBridgeStatusRuntimeDeps<
   getInstanceSlot?: () => string | undefined;
   getInstanceThreadName?: () => string | undefined;
   getNowMs?: () => number;
+  getTraffic?: () => TelegramStatusTraffic;
 }
 
 export interface TelegramBridgeStatusLineOptions {
@@ -565,13 +602,19 @@ export function createTelegramStatusRuntime<
   const statusKey = deps.statusKey ?? "telegram";
   return {
     updateStatus: (ctx, error) => {
-      ctx.ui.setStatus(
-        statusKey,
-        buildTelegramStatusBarText(
-          ctx.ui.theme,
-          deps.getStatusBarState(ctx, error),
-        ),
+      const lines = buildTelegramStatusBarLines(
+        ctx.ui.theme,
+        deps.getStatusBarState(ctx, error),
       );
+      if (ctx.mode === "tui" && ctx.ui.setWidget) {
+        // The host strips ANSI from status text, so setStatus would drop the
+        // theme colors. String widgets keep them; clear the plain footer entry
+        // so the state is not shown twice.
+        ctx.ui.setWidget(statusKey, lines, { placement: "belowEditor" });
+        ctx.ui.setStatus(statusKey, undefined);
+        return;
+      }
+      ctx.ui.setStatus(statusKey, lines[0]);
     },
     getStatusLines: (options) =>
       buildTelegramBridgeStatusLines(deps.getBridgeStatusLineState(), options),
@@ -599,6 +642,8 @@ export function createTelegramBridgeStatusRuntime<
         hasBotToken: !!config.botToken,
         pollingActive: deps.isPollingActive(),
         paired: !!config.allowedUserId,
+        botUsername: config.botUsername,
+        traffic: deps.getTraffic?.(),
         busRole: deps.getBusRole?.(),
         busLifecyclePhase: deps.getBusLifecyclePhase?.(),
         instanceSlot: deps.getInstanceSlot?.(),
@@ -618,6 +663,7 @@ export function createTelegramBridgeStatusRuntime<
           queuedItems: queuedItems.length,
         }),
         queuedStatus: deps.formatQueuedStatus(queuedItems),
+        queuedPreview: deps.getQueuedPreview?.(queuedItems),
         error,
       };
     },
@@ -639,6 +685,7 @@ export function createTelegramBridgeStatusRuntime<
         instanceSlot: deps.getInstanceSlot?.(),
         instanceThreadName: deps.getInstanceThreadName?.(),
         lockState: deps.getRuntimeLockState?.(),
+        traffic: deps.getTraffic?.(),
         pollingActive: deps.isPollingActive(),
         lastUpdateId: config.lastUpdateId,
         activeSourceMessageIds: deps.getActiveSourceMessageIds(),
@@ -761,38 +808,271 @@ function getTelegramStatusBarLabel(state: TelegramStatusBarState): string {
   return threadName;
 }
 
+interface TelegramStatusBarGlyphs {
+  enabled: string;
+  shadowed: string;
+  running: string;
+  warning: string;
+  error: string;
+  disabled: string;
+  dot: string;
+  input: string;
+  output: string;
+  time: string;
+}
+
+function resolveTelegramStatusBarGlyphs(
+  theme: TelegramStatusBarTheme,
+): TelegramStatusBarGlyphs {
+  return {
+    enabled: theme.status?.enabled ?? "●",
+    shadowed: theme.status?.shadowed ?? "○",
+    running: theme.status?.running ?? "⟳",
+    warning: theme.status?.warning ?? "⚠",
+    error: theme.status?.error ?? "✘",
+    disabled: theme.status?.disabled ?? "⦸",
+    dot: theme.sep?.dot ?? " · ",
+    input: theme.icon?.input ?? "↓",
+    output: theme.icon?.output ?? "↑",
+    time: theme.icon?.time ?? "⏱",
+  };
+}
+
+function formatTelegramStatusBarClock(timestampMs: number): string {
+  const date = new Date(timestampMs);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+/** Bot name, message counters and last activity, each behind a muted dot. */
+function buildTelegramStatusBarDetails(
+  theme: TelegramStatusBarTheme,
+  glyphs: TelegramStatusBarGlyphs,
+  state: TelegramStatusBarState,
+): string {
+  const parts: string[] = [];
+  if (state.botUsername) {
+    parts.push(`@${sanitizeTelegramStatusText(state.botUsername)}`);
+  }
+  if (state.traffic) {
+    const failed = state.traffic.failed
+      ? ` ${glyphs.error}${state.traffic.failed}`
+      : "";
+    parts.push(
+      `${glyphs.input}${state.traffic.received} ${glyphs.output}${state.traffic.sent}${failed}`,
+    );
+    if (state.traffic.lastAtMs !== undefined) {
+      parts.push(
+        `${glyphs.time} ${formatTelegramStatusBarClock(state.traffic.lastAtMs)}`,
+      );
+    }
+  }
+  return parts
+    .map((part) => theme.fg("muted", `${glyphs.dot}${part}`))
+    .join("");
+}
+
+function buildTelegramTrafficLines(
+  state: Pick<TelegramBridgeStatusLineState, "traffic">,
+): string[] {
+  if (!state.traffic) return [];
+  const last =
+    state.traffic.lastAtMs === undefined
+      ? ""
+      : `, last ${formatTelegramStatusBarClock(state.traffic.lastAtMs)}`;
+  return [
+    `- messages: ${state.traffic.received} received, ${state.traffic.sent} sent${state.traffic.failed ? `, ${state.traffic.failed} failed` : ""}${last}`,
+  ];
+}
+
+/**
+ * Strip control characters and bidi overrides. Widget lines bypass the host's
+ * status sanitizer, and thread names, bot names, queue summaries and error text
+ * can all originate from Telegram, so none may carry terminal escapes.
+ */
+export function sanitizeTelegramStatusText(text: string): string {
+  return text
+    .replace(
+      /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
+      " ",
+    )
+    .replace(/ +/g, " ")
+    .trim();
+}
+
+export interface TelegramStatusErrorSummary {
+  /** Short state text such as "invalid token". */
+  label: string;
+  /** What the operator can do next, or "retrying" while the bridge retries. */
+  hint?: string;
+  /** fatal needs the operator, attention needs a look, retrying heals itself. */
+  kind: "fatal" | "attention" | "retrying";
+  /**
+   * The failed call may still have reached Telegram: a non-idempotent send hit
+   * a transport failure after the request left, so the outcome is unknown.
+   */
+  deliveryUnknown?: boolean;
+}
+
+/**
+ * Turn a raw transport or API failure into a short state and next step.
+ * Returns undefined for anything unrecognized so the raw text stays visible.
+ */
+export function summarizeTelegramStatusError(
+  message: string,
+): TelegramStatusErrorSummary | undefined {
+  if (/may have committed before transport failed/i.test(message)) {
+    return {
+      kind: "attention",
+      label: "delivery unconfirmed",
+      deliveryUnknown: true,
+    };
+  }
+  if (/HTTP 401\b|\bUnauthorized\b/i.test(message)) {
+    return { kind: "fatal", label: "invalid token", hint: "/telegram-setup" };
+  }
+  if (/HTTP 429\b|Too Many Requests|retry[ _]after/i.test(message)) {
+    const seconds = /retry[ _]after[:= ]+(\d+)/i.exec(message)?.[1];
+    return {
+      kind: "retrying",
+      label: seconds ? `rate limited ${seconds}s` : "rate limited",
+      hint: "retrying",
+    };
+  }
+  if (
+    /HTTP 409\b|\bConflict\b|terminated by other getUpdates/i.test(message)
+  ) {
+    return {
+      kind: "attention",
+      label: "another poller is active",
+      hint: "/telegram-status",
+    };
+  }
+  if (
+    /HTTP 5\d\d\b|Bad Gateway|Service Unavailable|Internal Server Error/i.test(
+      message,
+    )
+  ) {
+    return { kind: "retrying", label: "Telegram unavailable", hint: "retrying" };
+  }
+  if (
+    /Unable to connect|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|fetch failed|network|timed? out|socket hang up/i.test(
+      message,
+    )
+  ) {
+    return { kind: "retrying", label: "offline", hint: "retrying" };
+  }
+  return undefined;
+}
+
+function formatTelegramStatusBarError(
+  theme: TelegramStatusBarTheme,
+  glyphs: TelegramStatusBarGlyphs,
+  label: string,
+  error: string,
+): string {
+  const summary = summarizeTelegramStatusError(error);
+  if (!summary) {
+    const raw = sanitizeTelegramStatusText(error);
+    const shown = raw.length > 100 ? `${raw.slice(0, 99)}…` : raw;
+    return `${label} ${theme.fg("error", `${glyphs.error} error`)} ${theme.fg("muted", shown)}`;
+  }
+  const token = summary.kind === "fatal" ? "error" : "warning";
+  const glyph =
+    summary.kind === "fatal"
+      ? glyphs.error
+      : summary.kind === "retrying"
+        ? glyphs.running
+        : glyphs.warning;
+  const hint = summary.hint
+    ? theme.fg("muted", `${glyphs.dot}${summary.hint}`)
+    : "";
+  return `${label} ${theme.fg(token, `${glyph} ${summary.label}`)}${hint}`;
+}
+
 export function buildTelegramStatusBarText(
   theme: TelegramStatusBarTheme,
   state: TelegramStatusBarState,
 ): string {
-  const label = theme.fg("accent", getTelegramStatusBarLabel(state));
-  if (state.error) {
-    return `${label} ${theme.fg("error", "error")} ${theme.fg("muted", state.error)}`;
-  }
+  const glyphs = resolveTelegramStatusBarGlyphs(theme);
+  const label = theme.fg(
+    "accent",
+    sanitizeTelegramStatusText(getTelegramStatusBarLabel(state)),
+  );
+  const hint = (text: string) => theme.fg("muted", `${glyphs.dot}${text}`);
   const queued = state.queuedStatus
     ? theme.fg("success", state.queuedStatus)
     : "";
-  if (!state.hasBotToken)
-    return `${label} ${theme.fg("muted", "not configured")}${queued}`;
-  if (!state.paired)
-    return `${label} ${theme.fg("warning", "awaiting pairing")}${queued}`;
-  if (state.busLifecyclePhase === "electing")
-    return `${label} ${theme.fg("warning", "electing")}${queued}`;
-  if (!state.pollingActive && state.busRole !== "follower")
-    return `${theme.fg("accent", "telegram")} ${theme.fg("muted", "disconnected")}${queued}`;
+  if (state.error) {
+    return formatTelegramStatusBarError(theme, glyphs, label, state.error);
+  }
+  if (!state.hasBotToken) {
+    return `${label} ${theme.fg("muted", `${glyphs.disabled} not configured`)}${queued}${hint("/telegram-setup")}`;
+  }
+  if (!state.paired) {
+    const bot = state.botUsername
+      ? `@${sanitizeTelegramStatusText(state.botUsername)}`
+      : "the bot";
+    return `${label} ${theme.fg("warning", `${glyphs.warning} awaiting pairing`)}${queued}${hint(`send /start to ${bot}`)}`;
+  }
+  if (state.busLifecyclePhase === "electing") {
+    return `${label} ${theme.fg("warning", `${glyphs.running} electing`)}${queued}`;
+  }
+  if (!state.pollingActive && state.busRole !== "follower") {
+    return `${theme.fg("accent", "telegram")} ${theme.fg("muted", `${glyphs.shadowed} disconnected`)}${queued}${hint("/telegram-connect")}`;
+  }
+  const details = buildTelegramStatusBarDetails(theme, glyphs, state);
   if (state.processing) {
     const processingStatus = state.queuedStatus
       ? "active"
       : (state.processingStatus ?? "processing");
     const processingToken =
       processingStatus === "active" ? "warning" : "accent";
-    return `${label} ${theme.fg(processingToken, processingStatus)}${queued}`;
+    return `${label} ${theme.fg(processingToken, `${glyphs.running} ${processingStatus}`)}${queued}${details}`;
   }
-  if (state.busRole === "follower")
-    return `${label} ${theme.fg("success", "follower")}${queued}`;
-  if (state.busRole === "leader")
-    return `${label} ${theme.fg("success", "leader")}`;
-  return `${label} ${theme.fg("success", "connected")}`;
+  const role = state.busRole ?? "connected";
+  return `${label} ${theme.fg("success", `${glyphs.enabled} ${role}`)}${queued}${details}`;
+}
+
+/** Up to two queued turns and a remainder count, only while the bridge is up. */
+function buildTelegramStatusBarQueueLine(
+  theme: TelegramStatusBarTheme,
+  state: TelegramStatusBarState,
+): string | undefined {
+  const operational =
+    state.hasBotToken &&
+    state.paired &&
+    !state.error &&
+    state.busLifecyclePhase !== "electing" &&
+    (state.pollingActive || state.busRole === "follower");
+  const preview = (state.queuedPreview ?? [])
+    .map(sanitizeTelegramStatusText)
+    .filter((summary) => summary.length > 0);
+  if (!operational || preview.length === 0) return undefined;
+  const glyphs = resolveTelegramStatusBarGlyphs(theme);
+  const shown = preview.slice(0, 2).map((summary) => `"${summary}"`);
+  const more =
+    preview.length > 2 ? `${glyphs.dot}+${preview.length - 2} more` : "";
+  return theme.fg("muted", `  next: ${shown.join(glyphs.dot)}${more}`);
+}
+
+/** The main status line, plus a queue preview line when turns are waiting. */
+export function buildTelegramStatusBarLines(
+  theme: TelegramStatusBarTheme,
+  state: TelegramStatusBarState,
+): string[] {
+  const queueLine = buildTelegramStatusBarQueueLine(theme, state);
+  return [
+    buildTelegramStatusBarText(theme, state),
+    ...(queueLine ? [queueLine] : []),
+  ];
+}
+
+/** Host spinner text while a turn that arrived from Telegram is running. */
+export function formatTelegramWorkingMessage(summary: string): string {
+  const text = sanitizeTelegramStatusText(summary);
+  return text ? `Answering Telegram · "${text}"` : "Answering Telegram";
 }
 
 function formatTelegramBridgeBotStatus(
@@ -1079,6 +1359,7 @@ function buildTelegramBridgeCompactStatusLines(
     `- bot: ${formatTelegramBridgeBotStatus(state)}`,
     ...(state.activeProfileName ? [`- profile: ${state.activeProfileName}`] : []),
     `- user: ${state.allowedUserId ?? "not paired"}`,
+    ...buildTelegramTrafficLines(state),
     ...(state.botThreadMode ? [`- thread mode: ${state.botThreadMode}`] : []),
     ...(state.busRole ? [`- role: ${state.busRole}`] : []),
     ...(state.busLifecyclePhase
@@ -1134,6 +1415,7 @@ export function buildTelegramBridgeDiagnosticStatusLines(
     `- bot: ${formatTelegramBridgeBotStatus(state)}`,
     ...(state.activeProfileName ? [`- profile: ${state.activeProfileName}`] : []),
     `- allowed user: ${state.allowedUserId ?? "not paired"}`,
+    ...buildTelegramTrafficLines(state),
     ...(state.botThreadMode
       ? [
           `- thread mode: ${state.botThreadMode}${state.botThreadModeAction ? ` reconcile=${state.botThreadModeAction}` : ""}`,

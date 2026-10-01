@@ -24,6 +24,7 @@ import * as MenuQueue from "./lib/menu-queue.ts";
 import * as MenuSettings from "./lib/menu-settings.ts";
 import * as Menu from "./lib/menu.ts";
 import * as Model from "./lib/model.ts";
+import * as Notices from "./lib/notices.ts";
 import * as Outbound from "./lib/outbound.ts";
 import * as Ownership from "./lib/ownership.ts";
 import * as Paths from "./lib/paths.ts";
@@ -43,6 +44,7 @@ import * as TelegramApi from "./lib/telegram-api.ts";
 import * as TextGroups from "./lib/text-groups.ts";
 import * as ThreadReconciler from "./lib/thread-reconciler.ts";
 import * as TimeInjection from "./lib/time-injection.ts";
+import * as Traffic from "./lib/traffic.ts";
 import * as Updates from "./lib/updates.ts";
 import * as Voice from "./lib/voice.ts";
 
@@ -274,11 +276,13 @@ export default function (pi: Pi.ExtensionAPI) {
       getFollowerThreadName: telegramBusFollowerRegistrationState.getThreadName,
       getCurrentIdentity: getCurrentInstanceThreadIdentity,
     });
+  const trafficCounters = Traffic.createTelegramTrafficCounters();
   const statusRuntime = Status.createTelegramBridgeStatusRuntime<
     Pi.ExtensionContext,
     Queue.TelegramQueueItem<Pi.ExtensionContext>
   >({
     getConfig: configStore.get,
+    getTraffic: trafficCounters.snapshot,
     getActiveProfileName: configStore.getActiveProfileName,
     getDiagnosticPaths: Paths.getTelegramDiagnosticsDisplayPaths,
     isPollingActive: Polling.createTelegramPollingActivityReader(
@@ -292,6 +296,7 @@ export default function (pi: Pi.ExtensionAPI) {
     hasPendingModelSwitch: pendingModelSwitchStore.has,
     getQueuedItems: telegramQueueStore.getQueuedItems,
     formatQueuedStatus: Queue.formatQueuedTelegramItemsStatus,
+    getQueuedPreview: Queue.formatQueuedTelegramItemsPreview,
     getRecentRuntimeEvents: runtimeEvents.getEvents,
     getRuntimeLockState: lockRuntime.getStatusLabel,
     ...threadStatusProjectionRuntime,
@@ -323,6 +328,18 @@ export default function (pi: Pi.ExtensionAPI) {
     getCwd: Pi.getExtensionContextCwd,
     recordRuntimeEvent,
   });
+  const notices = Notices.createTelegramNoticeRuntime({
+    getContext: telegramSessionContextStore.get,
+    notify: Pi.notifyExtensionContext,
+    recordRuntimeEvent,
+  });
+  const trafficBridge = Traffic.createTelegramTrafficStatusBridge({
+    counters: trafficCounters,
+    getContext: telegramSessionContextStore.get,
+    updateStatus,
+    recordRuntimeEvent,
+    onDeliveryFailed: notices.deliveryFailed,
+  });
 
   // --- Telegram API ---
 
@@ -330,6 +347,8 @@ export default function (pi: Pi.ExtensionAPI) {
     TelegramApi.createDefaultTelegramBridgeApiRuntime({
       getBotToken: configStore.getBotToken,
       recordRuntimeEvent,
+      onCallSucceeded: trafficBridge.onCallSucceeded,
+      onCallFailed: trafficBridge.onCallFailed,
     });
   const telegramBusFollowerClients =
     BusFollower.createTelegramBusFollowerClientRuntime<
@@ -645,6 +664,8 @@ export default function (pi: Pi.ExtensionAPI) {
   const inboundRouteRuntime = Routing.createTelegramInboundRouteRuntime({
     configStore,
     callApi: callTelegramApi,
+    onAuthorizedMessage: trafficBridge.onAuthorizedMessage,
+    onPaired: notices.paired,
     getCurrentInstanceId() {
       return telegramInstanceId;
     },
@@ -822,6 +843,7 @@ export default function (pi: Pi.ExtensionAPI) {
     stopTypingLoop: typing.stop,
     updateStatus,
     recordRuntimeEvent,
+    onRecovered: notices.recovered,
   });
   const recoverStaleTelegramTopicApiError = function (
     apiBody: unknown,
