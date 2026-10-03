@@ -44,6 +44,7 @@ test("Thinking payloads offer only supported efforts and do not mark unsupported
     text: button.text,
     callback: button.callback_data,
   })), [
+    { text: "off", callback: "thinking:set:off" },
     { text: "low", callback: "thinking:set:low" },
     { text: "high", callback: "thinking:set:high" },
     { text: "🟢 max", callback: "thinking:set:max" },
@@ -52,9 +53,9 @@ test("Thinking payloads offer only supported efforts and do not mark unsupported
   assert.equal(stale.inline_keyboard.flat().some((button) => button.text.startsWith("🟢")), false);
 });
 
-test("Empty efforts leave navigation available without invented thinking choices", () => {
+test("Empty OMP efforts still expose the native off selector", () => {
   const markup = buildThinkingMenuReplyMarkup("high", { ...reasoningModel, thinking: { efforts: [] } });
-  assert.deepEqual(markup.inline_keyboard.flat().map((button) => button.callback_data), ["menu:back"]);
+  assert.deepEqual(markup.inline_keyboard.flat().map((button) => button.callback_data), ["menu:back", "thinking:set:off"]);
 });
 
 test("Pi mapped thinking menus omit null and unadvertised extended levels", () => {
@@ -74,7 +75,7 @@ test("Stale thinking callbacks are rejected after switching to a limited model",
   let current: ThinkingLevel = "high";
   const answers: (string | undefined)[] = [];
   let updates = 0;
-  for (const level of ["max", "minimal", "off"]) {
+  for (const level of ["max", "minimal"]) {
     const button = oldButtons.find((entry) => entry.callback_data === `thinking:set:${level}`);
     assert.ok(button);
     assert.equal(await handleTelegramThinkingMenuCallbackAction("stale", button.callback_data, activeModel, {
@@ -86,7 +87,7 @@ test("Stale thinking callbacks are rejected after switching to a limited model",
   }
   assert.equal(current, "high");
   assert.equal(updates, 0);
-  assert.deepEqual(answers, Array(3).fill("This model does not support that thinking level."));
+  assert.deepEqual(answers, Array(2).fill("This model does not support that thinking level."));
 });
 
 test("Explicitly supported max is applied and reflected in thinking selection", async () => {
@@ -102,6 +103,25 @@ test("Explicitly supported max is applied and reflected in thinking selection", 
   assert.equal(current, "max");
   assert.equal(answer, "Thinking: max");
   assert.equal(buildThinkingMenuReplyMarkup(current, model).inline_keyboard.find((row) => row[0]?.callback_data === "thinking:set:max")?.[0]?.text, "🟢 max");
+});
+
+test("OMP off disables thinking even when off is absent from effort metadata", async () => {
+  const model: MenuModel = { ...reasoningModel, thinking: { efforts: ["low", "high", "max"] } };
+  let current: ThinkingLevel = "high";
+  let answer: string | undefined;
+  await handleTelegramThinkingMenuCallbackAction("off", "thinking:set:off", model, {
+    setThinkingLevel: (level) => { current = level; },
+    getCurrentThinkingLevel: () => current,
+    updateStatusMessage: async () => {},
+    answerCallbackQuery: async (_id, text) => { answer = text; },
+  });
+  assert.equal(current, "off");
+  assert.equal(answer, "Thinking: off");
+  assert.equal(
+    buildThinkingMenuReplyMarkup(current, model).inline_keyboard
+      .find((row) => row[0]?.callback_data === "thinking:set:off")?.[0]?.text,
+    "🟢 off",
+  );
 });
 
 test("Thinking callback sets valid levels and reports current level", async () => {

@@ -227,18 +227,27 @@ test("OMP efforts select recognized levels in menu order and override Pi mapping
       thinking: { efforts: ["max", "high", "unknown", "low", "high"] },
       thinkingLevelMap: { off: "disabled", high: null, max: null },
     })),
-    ["low", "high", "max"],
+    ["off", "low", "high", "max"],
   );
 });
 
-test("An explicit empty effort list does not invent thinking controls", () => {
+test("An OMP model without controllable efforts retains only the off selector", () => {
   assert.deepEqual(
     getSupportedModelThinkingLevels(createModelTestModel("fixture", "empty", {
       reasoning: true,
       thinking: { efforts: [] },
       thinkingLevelMap: { high: "enabled" },
     })),
-    [],
+    ["off"],
+  );
+  assert.deepEqual(
+    getSupportedModelThinkingLevels({
+      provider: "fixture",
+      id: "uncontrolled",
+      reasoning: true,
+      thinking: undefined,
+    }),
+    ["off"],
   );
 });
 
@@ -262,13 +271,16 @@ test("Scoped patterns retain models but omit unsupported thinking suffixes", () 
     reasoning: true,
     thinking: { efforts: ["low", "high"] },
   });
-  for (const level of ["max", "minimal", "off"] satisfies ThinkingLevel[]) {
+  for (const level of ["max", "minimal"] satisfies ThinkingLevel[]) {
     const selections = resolveScopedModelPatterns([`fixture/limited:${level}`], [model]);
     assert.deepEqual(selections.map((selection) => selection.model), [model]);
     assert.equal(selections[0]?.thinkingLevel, undefined);
   }
   assert.deepEqual(resolveScopedModelPatterns(["fixture/limited:high"], [model]), [
     { model, thinkingLevel: "high" },
+  ]);
+  assert.deepEqual(resolveScopedModelPatterns(["fixture/limited:off"], [model]), [
+    { model, thinkingLevel: "off" },
   ]);
 });
 

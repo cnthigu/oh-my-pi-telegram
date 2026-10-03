@@ -117,7 +117,7 @@ Config is written to `<agent-dir>/telegram.json`. The agent directory is `PI_COD
 
 `/help`, `/status`, `/model`, `/thinking`, `/queue` and `/settings` are accepted shortcuts into the same menus. Prompt templates registered in `omp` are reachable as `/template_name` commands.
 
-The thinking menu (`/thinking` or the operator menu) shows the active model's supported levels, including `max` only when supported. Models without capability metadata keep the previous full-ladder fallback. Unsupported picks from stale thinking or model menus are rejected without changing the model or thinking level; scoped model entries omit unsupported thinking suffixes.
+The thinking menu (`/thinking` or the operator menu) shows the active model's supported levels, including `max` only when supported. On omp, `off` remains available independently of the model's effort list, matching the native disable-thinking selector. Models without capability metadata keep the previous full-ladder fallback. Unsupported picks from stale thinking or model menus are rejected without changing the model or thinking level; scoped model entries omit unsupported thinking suffixes.
 
 ### omp commands
 

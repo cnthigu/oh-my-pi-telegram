@@ -40,9 +40,12 @@ export function getSupportedModelThinkingLevels(
   model: MenuModel | undefined,
 ): readonly ThinkingLevel[] {
   if (model?.reasoning === false) return NON_REASONING_THINKING_LEVELS;
-  const efforts = model?.thinking?.efforts;
-  if (Array.isArray(efforts)) {
-    return THINKING_LEVELS.filter((level) => efforts.includes(level));
+  if (model && "thinking" in model) {
+    const efforts = model.thinking?.efforts;
+    // OMP's off selector disables reasoning independently of declared efforts.
+    return THINKING_LEVELS.filter(
+      (level) => level === "off" || efforts?.includes(level) === true,
+    );
   }
   const mapping = model?.thinkingLevelMap;
   if (mapping !== undefined) {
