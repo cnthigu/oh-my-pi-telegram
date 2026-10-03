@@ -12,6 +12,8 @@ export interface MenuModel {
   id: string;
   name?: string;
   reasoning?: boolean;
+  thinking?: { efforts?: readonly string[] };
+  thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
 }
 
 export type ThinkingLevel =
@@ -31,6 +33,26 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   "xhigh",
   "max",
 ];
+
+const NON_REASONING_THINKING_LEVELS: readonly ThinkingLevel[] = ["off"];
+
+export function getSupportedModelThinkingLevels(
+  model: MenuModel | undefined,
+): readonly ThinkingLevel[] {
+  if (model?.reasoning === false) return NON_REASONING_THINKING_LEVELS;
+  const efforts = model?.thinking?.efforts;
+  if (Array.isArray(efforts)) {
+    return THINKING_LEVELS.filter((level) => efforts.includes(level));
+  }
+  const mapping = model?.thinkingLevelMap;
+  if (mapping !== undefined) {
+    return THINKING_LEVELS.filter((level) => {
+      if (mapping[level] === null) return false;
+      return (level !== "xhigh" && level !== "max") || mapping[level] !== undefined;
+    });
+  }
+  return THINKING_LEVELS;
+}
 
 export interface CurrentModelStore<
   TContext,
@@ -316,7 +338,13 @@ export function resolveScopedModelPatterns<
         const key = getCanonicalModelId(model);
         if (seen.has(key)) continue;
         seen.add(key);
-        resolved.push({ model, thinkingLevel });
+        resolved.push({
+          model,
+          thinkingLevel:
+            thinkingLevel && getSupportedModelThinkingLevels(model).includes(thinkingLevel)
+              ? thinkingLevel
+              : undefined,
+        });
       }
       continue;
     }
@@ -327,7 +355,11 @@ export function resolveScopedModelPatterns<
     seen.add(key);
     resolved.push({
       model: matched.model,
-      thinkingLevel: matched.thinkingLevel,
+      thinkingLevel:
+        matched.thinkingLevel &&
+        getSupportedModelThinkingLevels(matched.model).includes(matched.thinkingLevel)
+          ? matched.thinkingLevel
+          : undefined,
     });
   }
   return resolved;

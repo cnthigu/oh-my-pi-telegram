@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `Thinking Controls`: Filter the thinking menu by the active model's capabilities, including `max` only when supported, while preserving the full-ladder fallback when metadata is absent. Scoped model entries omit unsupported thinking suffixes, and stale unsupported picks leave model and thinking state unchanged.
 - `Status Errors`: Failures of the poll loop and of message delivery are classified into a short state with the next step (`invalid token · /telegram-setup`, `rate limited 12s · retrying`, `another poller is active · /telegram-status`, `Telegram unavailable`, `offline · retrying`); unrecognized messages stay verbatim, sanitized and trimmed to 100 characters. A non-idempotent send that hit a transport failure after the request left is reported as `delivery unconfirmed` instead of a definite failure. Impact: the status says what to do instead of showing raw runtime text.
 - `Status Persistence`: The poll loop cleared the error status after its retry sleep, before the next attempt, so a slow retry (a 12 s rate-limit wait) showed as `connected`. The reset now happens after the next successful `getUpdates`, and recovery is reported only when `getUpdates` itself had failed, not when an update handler did. Impact: an error stays visible until polling works again.
 - `Delivery Counters`: `lib/traffic.ts` counts undelivered messages (`recordFailed`, `onCallFailed`) and the status shows `✘N` next to the sent counter; `/telegram-status` adds `N failed`. `TelegramBridgeApiRuntime` gains `onCallFailed` beside `onCallSucceeded`.

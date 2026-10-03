@@ -31,7 +31,6 @@ import {
   buildTelegramStatusMenuRenderPayload,
   buildTelegramThinkingMenuRenderPayload,
   buildThinkingMenuReplyMarkup,
-  buildThinkingMenuText,
   createTelegramMenuActionRuntime,
   createTelegramMenuActionRuntimeWithStateBuilder,
   createTelegramMenuCallbackHandler,
@@ -64,7 +63,7 @@ import {
   updateTelegramStatusMessage,
   updateTelegramThinkingMenuMessage,
 } from "../lib/menu.ts";
-import type { MenuModel } from "../lib/model.ts";
+import { type MenuModel, resolveScopedModelPatterns, type ThinkingLevel } from "../lib/model.ts";
 import type { TelegramQueueItem } from "../lib/queue.ts";
 import { createTelegramExtensionSectionRegistry } from "../lib/sections.ts";
 
@@ -1395,6 +1394,65 @@ test("Menu helpers execute model callback actions across update, switch, and res
   assert.equal(events[9], "answer:Switching to claude-3 and continuing…");
 });
 
+test("Scoped model menus keep models selectable without advertising unsupported effort suffixes", () => {
+  const model: MenuModel = {
+    provider: "fixture",
+    id: "limited",
+    reasoning: true,
+    thinking: { efforts: ["low", "high"] },
+  };
+  const scopedModels = resolveScopedModelPatterns(["fixture/limited:max"], [model]);
+  const state = createMenuState(2, { scopedModels });
+  const button = buildModelMenuReplyMarkup(state, undefined, 6).inline_keyboard.flat()
+    .find((entry) => entry.callback_data === "model:open:0");
+  assert.ok(button);
+  assert.equal(button.text, "fixture/limited");
+  assert.equal(formatScopedModelButtonText({ model, thinkingLevel: "max" }, undefined), "fixture/limited");
+  assert.equal(formatScopedModelButtonText({ model, thinkingLevel: "high" }, undefined), "fixture/limited · high");
+});
+
+test("Stale scoped thinking suffixes reject model picks before switching or changing thinking", async () => {
+  const stale: MenuModel = {
+    provider: "fixture", id: "selected", reasoning: true,
+    thinking: { efforts: ["high", "max"] },
+  };
+  const limited: MenuModel = { ...stale, thinking: { efforts: ["low", "high"] } };
+  const other: MenuModel = { provider: "fixture", id: "current", reasoning: true };
+  for (const sameCurrentModel of [false, true]) {
+    const state = createMenuState(2, {
+      scopedModels: [{ model: sameCurrentModel ? stale : limited, thinkingLevel: "max" }],
+    });
+    let currentModel = sameCurrentModel ? limited : other;
+    let currentThinking: ThinkingLevel = "high";
+    let modelSwitches = 0;
+    let menuUpdates = 0;
+    const answers: (string | undefined)[] = [];
+    assert.equal(await handleTelegramModelMenuCallbackAction("stale-pick", {
+      data: "model:pick:0",
+      state,
+      activeModel: currentModel,
+      currentThinkingLevel: currentThinking,
+      isIdle: sameCurrentModel,
+      canRestartBusyRun: true,
+      hasActiveToolExecutions: !sameCurrentModel,
+    }, {
+      setModel: async () => { modelSwitches += 1; return true; },
+      setCurrentModel: (model) => { currentModel = model; },
+      setThinkingLevel: (level) => { currentThinking = level; },
+      updateModelMenuMessage: async () => { menuUpdates += 1; },
+      updateStatusMessage: async () => { throw new Error("rejected selection must not refresh status"); },
+      stagePendingModelSwitch: () => { throw new Error("rejected selection must not stage a restart"); },
+      restartInterruptedTelegramTurn: () => { throw new Error("rejected selection must not restart the turn"); },
+      answerCallbackQuery: async (_id, text) => { answers.push(text); },
+    }), true);
+    assert.equal(currentModel, sameCurrentModel ? limited : other);
+    assert.equal(currentThinking, "high");
+    assert.equal(modelSwitches, 0);
+    assert.equal(menuUpdates, 0);
+    assert.deepEqual(answers, ["This model does not support that thinking level."]);
+  }
+});
+
 test("Menu helpers handle status and thinking callback actions", async () => {
   const events: string[] = [];
   const reasoningModel = createMenuModel("openai", "gpt-5", true);
@@ -2093,9 +2151,7 @@ test("Menu helpers build model, thinking, and status UI payloads", () => {
     modelMarkup.inline_keyboard[2]?.[0]?.callback_data,
     "model:open:0",
   );
-  const thinkingText = buildThinkingMenuText();
-  assert.equal(thinkingText, "<b>🧠 Choose a thinking level:</b>");
-  const thinkingMarkup = buildThinkingMenuReplyMarkup("medium");
+  const thinkingMarkup = buildThinkingMenuReplyMarkup("medium", modelA);
   assert.equal(thinkingMarkup.inline_keyboard[0]?.[0]?.text, "⬆️ Main menu");
   assert.equal(
     thinkingMarkup.inline_keyboard[0]?.[0]?.callback_data,

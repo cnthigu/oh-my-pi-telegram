@@ -11,9 +11,9 @@ import type {
   TelegramReplyMarkup,
 } from "./menu-model.ts";
 import {
+  getSupportedModelThinkingLevels,
   isThinkingLevel,
   type MenuModel,
-  THINKING_LEVELS,
   type ThinkingLevel,
 } from "./model.ts";
 
@@ -111,6 +111,13 @@ export async function handleTelegramThinkingMenuCallbackAction(
     );
     return true;
   }
+  if (!getSupportedModelThinkingLevels(activeModel).includes(action.level)) {
+    await deps.answerCallbackQuery(
+      callbackQueryId,
+      "This model does not support that thinking level.",
+    );
+    return true;
+  }
   deps.setThinkingLevel(action.level);
   await deps.updateStatusMessage();
   await deps.answerCallbackQuery(
@@ -126,10 +133,11 @@ export function buildThinkingMenuText(): string {
 
 export function buildThinkingMenuReplyMarkup(
   currentThinkingLevel: ThinkingLevel,
+  activeModel: MenuModel | undefined,
 ): TelegramReplyMarkup {
   const rows = [[{ text: "⬆️ Main menu", callback_data: "menu:back" }]];
   rows.push(
-    ...THINKING_LEVELS.map((level) => [
+    ...getSupportedModelThinkingLevels(activeModel).map((level) => [
       {
         text: level === currentThinkingLevel ? `🟢 ${level}` : level,
         callback_data: `thinking:set:${level}`,
@@ -140,14 +148,14 @@ export function buildThinkingMenuReplyMarkup(
 }
 
 export function buildTelegramThinkingMenuRenderPayload(
-  _activeModel: MenuModel | undefined,
+  activeModel: MenuModel | undefined,
   currentThinkingLevel: ThinkingLevel,
 ): TelegramMenuRenderPayload {
   return {
     nextMode: "thinking",
     text: buildThinkingMenuText(),
     mode: "html",
-    replyMarkup: buildThinkingMenuReplyMarkup(currentThinkingLevel),
+    replyMarkup: buildThinkingMenuReplyMarkup(currentThinkingLevel, activeModel),
   };
 }
 

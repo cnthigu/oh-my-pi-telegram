@@ -7,6 +7,7 @@
 import type { TelegramInlineKeyboardMarkup } from "./keyboard.ts";
 import {
   getCanonicalModelId,
+  getSupportedModelThinkingLevels,
   type MenuModel,
   modelsMatch,
   parseTelegramCliScopedModelPatterns,
@@ -354,7 +355,10 @@ export function formatScopedModelButtonText<
   currentModel: TModel | undefined,
 ): string {
   let label = `${modelsMatch(entry.model, currentModel) ? "🟢 " : ""}${entry.model.provider}/${entry.model.id}`;
-  if (entry.thinkingLevel) {
+  if (
+    entry.thinkingLevel &&
+    getSupportedModelThinkingLevels(entry.model).includes(entry.thinkingLevel)
+  ) {
     label += ` · ${entry.thinkingLevel}`;
   }
   return truncateTelegramButtonLabel(label);
@@ -699,7 +703,10 @@ export function focusTelegramModelListPage(
 
 function formatScopedModelPattern(entry: ScopedTelegramModel): string {
   const key = getCanonicalModelId(entry.model);
-  return entry.thinkingLevel ? `${key}:${entry.thinkingLevel}` : key;
+  return entry.thinkingLevel &&
+    getSupportedModelThinkingLevels(entry.model).includes(entry.thinkingLevel)
+    ? `${key}:${entry.thinkingLevel}`
+    : key;
 }
 
 export function setTelegramModelScope(
@@ -858,6 +865,18 @@ export function buildTelegramModelCallbackPlan<
     return { kind: "answer", text: "Selected model is no longer available." };
   }
   const selection = selectionResult.selection;
+  const capabilityModel = modelsMatch(selection.model, params.activeModel)
+    ? params.activeModel
+    : selection.model;
+  if (
+    selection.thinkingLevel &&
+    !getSupportedModelThinkingLevels(capabilityModel).includes(selection.thinkingLevel)
+  ) {
+    return {
+      kind: "answer",
+      text: "This model does not support that thinking level.",
+    };
+  }
   if (modelsMatch(selection.model, params.activeModel)) {
     if (action.action === "pick-selected") {
       focusTelegramModelListPage(params.state, selection.model);

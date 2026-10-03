@@ -20,6 +20,7 @@ import {
   createTelegramModelSwitchController,
   createTelegramModelSwitchControllerRuntime,
   getCanonicalModelId,
+  getSupportedModelThinkingLevels,
   isThinkingLevel,
   type MenuModel,
   modelsMatch,
@@ -29,7 +30,7 @@ import {
   restartTelegramModelSwitchContinuation,
   shouldTriggerPendingTelegramModelSwitchAbort,
   sortScopedModels,
-  THINKING_LEVELS,
+  type ThinkingLevel,
 } from "../lib/model.ts";
 import type { PendingTelegramTurn } from "../lib/queue.ts";
 
@@ -137,16 +138,7 @@ test("Current model update runtime stores selections and refreshes status", () =
   assert.deepEqual(statuses, ["direct", "event"]);
 });
 
-test("Model helpers match models, detect thinking levels, and expose constants", () => {
-  assert.deepEqual(THINKING_LEVELS, [
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-  ]);
+test("Model helpers match models and recognize thinking levels", () => {
   assert.equal(
     modelsMatch(createModelTestModel(), createModelTestModel()),
     true,
@@ -210,6 +202,74 @@ test("Model helpers resolve scoped model patterns and sort current models first"
   );
   const sorted = sortScopedModels(resolved, models[0]);
   assert.equal(sorted[0]?.model.id, "gpt-5");
+});
+
+test("Models without capability metadata retain the legacy thinking ladder", () => {
+  const expected = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  assert.deepEqual(getSupportedModelThinkingLevels(undefined), expected);
+  assert.deepEqual(getSupportedModelThinkingLevels(createModelTestModel("fixture", "legacy", { reasoning: true })), expected);
+});
+
+test("Explicit non-reasoning models offer only off even with effort metadata", () => {
+  assert.deepEqual(
+    getSupportedModelThinkingLevels(createModelTestModel("fixture", "plain", {
+      reasoning: false,
+      thinking: { efforts: ["high", "max"] },
+    })),
+    ["off"],
+  );
+});
+
+test("OMP efforts select recognized levels in menu order and override Pi mappings", () => {
+  assert.deepEqual(
+    getSupportedModelThinkingLevels(createModelTestModel("fixture", "efforts", {
+      reasoning: true,
+      thinking: { efforts: ["max", "high", "unknown", "low", "high"] },
+      thinkingLevelMap: { off: "disabled", high: null, max: null },
+    })),
+    ["low", "high", "max"],
+  );
+});
+
+test("An explicit empty effort list does not invent thinking controls", () => {
+  assert.deepEqual(
+    getSupportedModelThinkingLevels(createModelTestModel("fixture", "empty", {
+      reasoning: true,
+      thinking: { efforts: [] },
+      thinkingLevelMap: { high: "enabled" },
+    })),
+    [],
+  );
+});
+
+test("Pi mappings disable null levels and require explicit extended-level support", () => {
+  const model = createModelTestModel("fixture", "mapped", {
+    reasoning: true,
+    thinkingLevelMap: { off: null, minimal: null, high: "budget-high", max: null },
+  });
+  assert.deepEqual(getSupportedModelThinkingLevels(model), ["low", "medium", "high"]);
+  assert.deepEqual(
+    getSupportedModelThinkingLevels({
+      ...model,
+      thinkingLevelMap: { ...model.thinkingLevelMap, xhigh: "budget-extra", max: "budget-max" },
+    }),
+    ["low", "medium", "high", "xhigh", "max"],
+  );
+});
+
+test("Scoped patterns retain models but omit unsupported thinking suffixes", () => {
+  const model = createModelTestModel("fixture", "limited", {
+    reasoning: true,
+    thinking: { efforts: ["low", "high"] },
+  });
+  for (const level of ["max", "minimal", "off"] satisfies ThinkingLevel[]) {
+    const selections = resolveScopedModelPatterns([`fixture/limited:${level}`], [model]);
+    assert.deepEqual(selections.map((selection) => selection.model), [model]);
+    assert.equal(selections[0]?.thinkingLevel, undefined);
+  }
+  assert.deepEqual(resolveScopedModelPatterns(["fixture/limited:high"], [model]), [
+    { model, thinkingLevel: "high" },
+  ]);
 });
 
 test("Pending model-switch store owns selection state helpers", () => {
